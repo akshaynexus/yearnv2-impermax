@@ -16,7 +16,9 @@ import "../interfaces/IUniRouterV2.sol";
 
 import "../interfaces/ITrueFiLendingPool.sol";
 import "../interfaces/ITrueFarm.sol";
+
 interface ITrueFiLendingPoolToken is ITrueFiLendingPool, IERC20 {}
+
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
     using SafeERC20 for ITrueFiLendingPoolToken;
@@ -45,18 +47,16 @@ contract Strategy is BaseStrategy {
 
     event Cloned(address indexed clone);
 
-    constructor(address _vault,address _truefilendpool, address _farm) public BaseStrategy(_vault) {
-        _initializeStrat(_truefilendpool,_farm);
-    }
-
-    function _initializeStrat(
+    constructor(
+        address _vault,
         address _truefilendpool,
         address _farm
-    ) internal {
-        require(
-            address(lender) == address(0),
-            "Strategy already initialized"
-        );
+    ) public BaseStrategy(_vault) {
+        _initializeStrat(_truefilendpool, _farm);
+    }
+
+    function _initializeStrat(address _truefilendpool, address _farm) internal {
+        require(address(lender) == address(0), "Strategy already initialized");
 
         // You can set these parameters on deployment to whatever you want
         maxReportDelay = 6300;
@@ -64,7 +64,7 @@ contract Strategy is BaseStrategy {
         debtThreshold = 1_000_000 * 1e18;
 
         lender = ITrueFiLendingPoolToken(_truefilendpool);
-        require(lender.token() == address(want),"Wrong want token");
+        require(lender.token() == address(want), "Wrong want token");
         truFarm = ITrueFarm(_farm);
         //Approve lending contract to spend want
         want.safeApprove(_truefilendpool, type(uint256).max);
@@ -98,14 +98,7 @@ contract Strategy is BaseStrategy {
         address _truefilendpool,
         address _farm
     ) external returns (address newStrategy) {
-        newStrategy = this.cloneStrategy(
-            _vault,
-            msg.sender,
-            msg.sender,
-            msg.sender,
-            _truefilendpool,
-            _farm
-        );
+        newStrategy = this.cloneStrategy(_vault, msg.sender, msg.sender, msg.sender, _truefilendpool, _farm);
     }
 
     function cloneStrategy(
@@ -122,26 +115,13 @@ contract Strategy is BaseStrategy {
         assembly {
             // EIP-1167 bytecode
             let clone_code := mload(0x40)
-            mstore(
-                clone_code,
-                0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000000000000000000000
-            )
+            mstore(clone_code, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000000000000000000000)
             mstore(add(clone_code, 0x14), addressBytes)
-            mstore(
-                add(clone_code, 0x28),
-                0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000
-            )
+            mstore(add(clone_code, 0x28), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        Strategy(newStrategy).initialize(
-            _vault,
-            _strategist,
-            _rewards,
-            _keeper,
-            _truefilendingpool,
-            _farm
-        );
+        Strategy(newStrategy).initialize(_vault, _strategist, _rewards, _keeper, _truefilendingpool, _farm);
 
         emit Cloned(newStrategy);
     }
@@ -172,17 +152,18 @@ contract Strategy is BaseStrategy {
         //Add the want balance and staked balance
         return balanceOfWant().add(balanceOfStake());
     }
+
     function _claimAndSwapNoOneInch() internal {
-            //Claim Tru rewards
-            truFarm.claim();
-            //Swap through sushiswap
-            router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-                TRU.balanceOf(address(this)),
-                0,
-                getTokenOutPath(address(TRU),address(want)),
-                address(this),
-                block.timestamp
-            );
+        //Claim Tru rewards
+        truFarm.claim();
+        //Swap through sushiswap
+        router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+            TRU.balanceOf(address(this)),
+            0,
+            getTokenOutPath(address(TRU), address(want)),
+            address(this),
+            block.timestamp
+        );
     }
 
     //TODO create prepare return for oneinch swap
@@ -190,7 +171,7 @@ contract Strategy is BaseStrategy {
         //Claim Tru rewards
         truFarm.claim();
         //Swap TRU to USDC,also check the data before doing so
-        if(_oneInch.length > 0) {
+        if (_oneInch.length > 0) {
             //Taken from Truefi lending pool code
             uint256 balanceBefore = balanceOfWant();
 
@@ -214,7 +195,7 @@ contract Strategy is BaseStrategy {
      * @param _token_out token to swap to
      * @return _path array for swap path
      */
-    function getTokenOutPath(address _token_in,address _token_out ) internal view returns (address [] memory _path) {
+    function getTokenOutPath(address _token_in, address _token_out) internal view returns (address[] memory _path) {
         bool is_weth = _token_in == address(weth) || _token_out == address(weth);
         _path = new address[](is_weth ? 2 : 3);
         _path[0] = _token_in;
@@ -240,12 +221,12 @@ contract Strategy is BaseStrategy {
      * @param truIn Amount of TRU to swap
      * @return Estimated Output in want
      */
-    function getEstimatedOut(uint truIn) internal view returns (uint){
-        uint[] memory amounts = router.getAmountsOut(truIn,getTokenOutPath(address(TRU),address(want)));
+    function getEstimatedOut(uint256 truIn) internal view returns (uint256) {
+        uint256[] memory amounts = router.getAmountsOut(truIn, getTokenOutPath(address(TRU), address(want)));
         return amounts[amounts.length - 1];
     }
 
-    function returnDebtOutstanding(uint256 _debtOutstanding) internal returns (uint _debtPayment, uint _loss) {
+    function returnDebtOutstanding(uint256 _debtOutstanding) internal returns (uint256 _debtPayment, uint256 _loss) {
         // We might need to return want to the vault
         if (_debtOutstanding > 0) {
             uint256 _amountFreed = 0;
@@ -254,11 +235,10 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function handleProfit() internal returns (uint _profit) {
+    function handleProfit() internal returns (uint256 _profit) {
         uint256 balanceOfWantBefore = balanceOfWant();
-        if(pendingReward() > 0)
-            _claimAndSwapNoOneInch();
-        uint baseProfit = balanceOfWant().sub(balanceOfWantBefore);
+        if (pendingReward() > 0) _claimAndSwapNoOneInch();
+        uint256 baseProfit = balanceOfWant().sub(balanceOfWantBefore);
         //Subtract deposit fees from profit if we have any left to cover
         depositFeesToCover = depositFeesToCover > baseProfit ? depositFeesToCover.sub(baseProfit) : 0;
         _profit = depositFeesToCover > baseProfit ? 0 : baseProfit.sub(depositFeesToCover);
@@ -290,8 +270,8 @@ contract Strategy is BaseStrategy {
             //First lend to lender to get lend tokens
             lender.join(toInvest);
             //add loss to cover if we get lesser than what we enter with
-            uint balLend = balanceOfLendToken();
-            if(balLend < toInvest) depositFeesToCover = depositFeesToCover.add(toInvest.sub(balLend));
+            uint256 balLend = balanceOfLendToken();
+            if (balLend < toInvest) depositFeesToCover = depositFeesToCover.add(toInvest.sub(balLend));
             //Stake those tokens to tru farm for tru rewards
             truFarm.stake(balanceOfLendToken());
         }
@@ -303,7 +283,7 @@ contract Strategy is BaseStrategy {
         uint256 balanceWant = balanceOfWant();
         uint256 balanceStaked = balanceOfStake();
         if (_amountNeeded > balanceWant) {
-            uint amountToWithdraw = (Math.min(balanceStaked, _amountNeeded - balanceWant));
+            uint256 amountToWithdraw = (Math.min(balanceStaked, _amountNeeded - balanceWant));
             // unstake needed amount
             truFarm.unstake(amountToWithdraw);
             lender.liquidExit(amountToWithdraw);
@@ -314,7 +294,7 @@ contract Strategy is BaseStrategy {
 
     function prepareMigration(address _newStrategy) internal override {
         // If we have pending rewards,take that out
-        if(pendingReward() > 0){
+        if (pendingReward() > 0) {
             _claimAndSwapNoOneInch();
         }
         liquidatePosition(type(uint256).max);

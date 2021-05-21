@@ -21,7 +21,12 @@ def test_migrate(
     totalasset_beforemig = strategy.estimatedTotalAssets()
     assert totalasset_beforemig > 0
 
-    strategy2 = strategist.deploy(Strategy, vault, "0xA991356d261fbaF194463aF6DF8f0464F8f1c742","0x6b6A4EABa8bA12765dF51a859C0Fa75894817f5a")
+    strategy2 = strategist.deploy(
+        Strategy,
+        vault,
+        "0xA991356d261fbaF194463aF6DF8f0464F8f1c742",
+        "0x6b6A4EABa8bA12765dF51a859C0Fa75894817f5a",
+    )
     vault.migrateStrategy(strategy, strategy2, {"from": gov})
     # Check that we got all the funds on migration
     assert strategy2.estimatedTotalAssets() == totalasset_beforemig
