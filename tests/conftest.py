@@ -50,13 +50,13 @@ def rewards(gov):
 @pytest.fixture
 def currency(interface):
     # this one is curvesteth
-    yield interface.ERC20("0x111111111117dC0aa78b770fA6A738034120C302")
+    yield interface.ERC20("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 
 
 @pytest.fixture
-def whale(accounts, web3, currency, chain):
+def whale(accounts):
     # Binance 7,Has alot of 1INCH
-    yield accounts.at("0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8", force=True)
+    yield accounts.at("0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503", force=True)
 
 
 @pytest.fixture
@@ -71,6 +71,6 @@ def vault(pm, gov, rewards, guardian, currency):
 
 @pytest.fixture
 def strategy(strategist, keeper, vault, Strategy):
-    strategy = strategist.deploy(Strategy, vault)
+    strategy = strategist.deploy(Strategy, vault,"0xA991356d261fbaF194463aF6DF8f0464F8f1c742","0x6b6A4EABa8bA12765dF51a859C0Fa75894817f5a")
     strategy.setKeeper(keeper)
     yield strategy

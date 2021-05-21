@@ -2,9 +2,9 @@ import pytest
 import brownie
 from brownie import Wei
 
-deposit_amount = Wei("40000 ether")
-second_deposit_amount = Wei("160000 ether")
-final_amount = Wei("80000 ether")
+deposit_amount = 40000 * 1e6
+second_deposit_amount = 160000 * 1e6
+final_amount = 80000 * 1e6
 
 
 def test_increasing_debt_limit(gov, whale, currency, vault, strategy):

@@ -21,11 +21,11 @@ def test_operation(
     interface,
 ):
     # Amount configs
-    test_budget = Wei("888000 ether")
-    approve_amount = Wei("1000000 ether")
-    deposit_limit = Wei("889000 ether")
-    bob_deposit = Wei("100000 ether")
-    alice_deposit = Wei("788000 ether")
+    test_budget = 888000 * 1e6
+    approve_amount = 1000000 * 1e6
+    deposit_limit = 889000 * 1e6
+    bob_deposit = 100000 * 1e6
+    alice_deposit = 788000 * 1e6
     currency.approve(whale, approve_amount, {"from": whale})
     currency.transferFrom(whale, gov, test_budget, {"from": whale})
 
@@ -42,10 +42,15 @@ def test_operation(
 
     vault.deposit(bob_deposit, {"from": bob})
     vault.deposit(alice_deposit, {"from": alice})
-    # Sleep and harvest 5 times
+    # Sleep and harvest 5 times,approx for 24 hours
     sleepAndHarvest(5, strategy, gov)
     # We should have made profit or stayed stagnant (This happens when there is no rewards in 1INCH rewards)
-    assert vault.pricePerShare() / 1e18 >= 1
+    assert vault.pricePerShare() / 1e6 >= 1
+    # Log estimated APR
+    growthInShares = vault.pricePerShare() - 1e6
+    growthInPercent = (growthInShares / 1e6) * 100
+    growthYearly = growthInPercent * 365
+    print(f"Yearly APR :{growthYearly}%")
     # Withdraws should not fail
     vault.withdraw(alice_deposit, {"from": alice})
     vault.withdraw(bob_deposit, {"from": bob})
@@ -55,13 +60,13 @@ def test_operation(
     assert currency.balanceOf(bob) >= bob_deposit
 
     # Make sure it isnt less than 1 after depositors withdrew
-    assert vault.pricePerShare() / 1e18 >= 1
+    assert vault.pricePerShare() / 1e6 >= 1
 
 
 def sleepAndHarvest(times, strat, gov):
     for i in range(times):
         debugStratData(strat, "Before harvest" + str(i))
-        chain.sleep(2500)
+        chain.sleep(17280)
         chain.mine(1)
         strat.harvest({"from": gov})
         debugStratData(strat, "After harvest" + str(i))
@@ -71,6 +76,6 @@ def sleepAndHarvest(times, strat, gov):
 def debugStratData(strategy, msg):
     print(msg)
     print("Total assets " + str(strategy.estimatedTotalAssets()))
-    print("1INCH Balance " + str(strategy.balanceOfWant()))
+    print("USDC Balance " + str(strategy.balanceOfWant()))
     print("Stake balance " + str(strategy.balanceOfStake()))
     print("Pending reward " + str(strategy.pendingReward()))
