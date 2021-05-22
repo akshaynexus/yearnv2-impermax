@@ -49,6 +49,7 @@ def test_operation(
     # Log estimated APR
     growthInShares = vault.pricePerShare() - 1e6
     growthInPercent = (growthInShares / 1e6) * 100
+    growthInPercent = growthInPercent * 24
     growthYearly = growthInPercent * 365
     print(f"Yearly APR :{growthYearly}%")
     # Withdraws should not fail
@@ -66,8 +67,10 @@ def test_operation(
 def sleepAndHarvest(times, strat, gov):
     for i in range(times):
         debugStratData(strat, "Before harvest" + str(i))
-        chain.sleep(17280)
-        chain.mine(1)
+        #Alchemix staking pools calculate reward per block,so mimic mainnet chain flow to get accurate returns
+        for j in range(139):
+            chain.sleep(13)
+            chain.mine(1)
         strat.harvest({"from": gov})
         debugStratData(strat, "After harvest" + str(i))
 

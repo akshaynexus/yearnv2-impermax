@@ -13,69 +13,56 @@ import "@openzeppelin/contracts/math/Math.sol";
 // Import interfaces for many popular DeFi projects, or add your own!
 import "../libraries/OneInch.sol";
 import "../interfaces/IUniRouterV2.sol";
-
-import "../interfaces/ITrueFiLendingPool.sol";
-import "../interfaces/ITrueFarm.sol";
-
-interface ITrueFiLendingPoolToken is ITrueFiLendingPool, IERC20 {}
+import "../interfaces/IStakingPools.sol";
 
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
-    using SafeERC20 for ITrueFiLendingPoolToken;
     using Address for address;
     using SafeMath for uint256;
     using OneInchExchange for I1Inch3;
 
     uint256 private constant BASIS_PRECISION = 10000;
     uint16 public constant TOLERATED_SLIPPAGE = 100; // 1%
-    uint256 public depositFeesToCover;
+    uint256 public poolId;
 
     address public OneInch;
 
-    IERC20 public constant TRU = IERC20(0x4C19596f5aAfF459fA38B0f7eD92F11AE6543784);
+    IERC20 public constant KKO = IERC20(0x368C5290b13cAA10284Db58B4ad4F3E9eE8bf4c9);
     address private constant weth = address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+
     //Sushiswap router has the highest liq by far,so we use this
     IUniRouterV2 public router = IUniRouterV2(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
 
-    //This contract mints lend position tokens on deposit
-    ITrueFiLendingPoolToken lender;
-    //We deposit the lender tokens in this contract to gain TRU rewards
-    ITrueFarm truFarm;
+    //We deposit stables to farm KKO
+    IStakingPools public constant pool = IStakingPools(0x4C5De8f603125ca134B24DAeA8EafA163ca9F983);
 
     //1Inch instance for best output
     I1Inch3 _1INCH;
 
     event Cloned(address indexed clone);
 
-    constructor(
-        address _vault,
-        address _truefilendpool,
-        address _farm
-    ) public BaseStrategy(_vault) {
-        _initializeStrat(_truefilendpool, _farm);
+    constructor(address _vault, uint256 _poolId) public BaseStrategy(_vault) {
+        _initializeStrat(_poolId);
     }
 
-    function _initializeStrat(address _truefilendpool, address _farm) internal {
-        require(address(lender) == address(0), "Strategy already initialized");
-
+    function _initializeStrat(uint256 _poolId) internal {
         // You can set these parameters on deployment to whatever you want
         maxReportDelay = 6300;
         profitFactor = 1500;
         debtThreshold = 1_000_000 * 1e18;
 
-        lender = ITrueFiLendingPoolToken(_truefilendpool);
-        require(lender.token() == address(want), "Wrong want token");
-        truFarm = ITrueFarm(_farm);
-        //Approve lending contract to spend want
-        want.safeApprove(_truefilendpool, type(uint256).max);
-        //Approve farming contract to spend lend token
-        lender.safeApprove(_farm, type(uint256).max);
+        poolId = _poolId;
+        require(pool.getPoolToken(poolId) == address(want), "Invalid pid for want");
+
+        //Approve farming contract to spend reward token
+        want.safeApprove(address(pool), type(uint256).max);
+
         //Set 1inch v3 router address
         OneInch = 0x11111112542D85B3EF69AE05771c2dCCff4fAa26;
         _1INCH = I1Inch3(OneInch);
 
-        TRU.safeApprove(address(router), type(uint256).max);
-        TRU.safeApprove(OneInch, type(uint256).max);
+        KKO.safeApprove(address(router), type(uint256).max);
+        KKO.safeApprove(OneInch, type(uint256).max);
     }
 
     function initialize(
@@ -83,22 +70,15 @@ contract Strategy is BaseStrategy {
         address _strategist,
         address _rewards,
         address _keeper,
-        address _truefilendpool,
-        address _farm
+        uint256 _poolId
     ) external {
         //note: initialise can only be called once. in _initialize in BaseStrategy we have: require(address(want) == address(0), "Strategy already initialized");
         _initialize(_vault, _strategist, _rewards, _keeper);
-        _initializeStrat(_truefilendpool, _farm);
+        _initializeStrat(_poolId);
     }
 
-    function cloneStrategy(
-        address _vault,
-        address _staker,
-        address _router,
-        address _truefilendpool,
-        address _farm
-    ) external returns (address newStrategy) {
-        newStrategy = this.cloneStrategy(_vault, msg.sender, msg.sender, msg.sender, _truefilendpool, _farm);
+    function cloneStrategy(address _vault, uint256 _poolId) external returns (address newStrategy) {
+        newStrategy = this.cloneStrategy(_vault, msg.sender, msg.sender, msg.sender, _poolId);
     }
 
     function cloneStrategy(
@@ -106,8 +86,7 @@ contract Strategy is BaseStrategy {
         address _strategist,
         address _rewards,
         address _keeper,
-        address _truefilendingpool,
-        address _farm
+        uint256 _poolId
     ) external returns (address newStrategy) {
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
         bytes20 addressBytes = bytes20(address(this));
@@ -121,31 +100,26 @@ contract Strategy is BaseStrategy {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        Strategy(newStrategy).initialize(_vault, _strategist, _rewards, _keeper, _truefilendingpool, _farm);
+        Strategy(newStrategy).initialize(_vault, _strategist, _rewards, _keeper, _poolId);
 
         emit Cloned(newStrategy);
     }
 
     function name() external view override returns (string memory) {
-        return "StrategyTrueFiLender";
+        return "StrategyKinekoFarmer";
     }
 
-    // returns balance of 1INCH
     function balanceOfWant() public view returns (uint256) {
         return want.balanceOf(address(this));
     }
 
-    function balanceOfLendToken() public view returns (uint256) {
-        return lender.balanceOf(address(this));
-    }
-
     //Returns staked value
     function balanceOfStake() public view returns (uint256) {
-        return truFarm.staked(address(this));
+        return pool.getStakeTotalDeposited(address(this), poolId, false);
     }
 
     function pendingReward() public view returns (uint256) {
-        return truFarm.claimable(address(this));
+        return pool.getStakeTotalUnclaimed(address(this), poolId, false);
     }
 
     function estimatedTotalAssets() public view override returns (uint256) {
@@ -153,14 +127,26 @@ contract Strategy is BaseStrategy {
         return balanceOfWant().add(balanceOfStake());
     }
 
+    function _deposit(uint256 _depositAmount) internal {
+        pool.deposit(poolId, _depositAmount);
+    }
+
+    function _withdraw(uint256 _withdrawAmount) internal {
+        pool.withdraw(poolId, _withdrawAmount);
+    }
+
+    function _getReward() internal virtual {
+        pool.claim(poolId);
+    }
+
     function _claimAndSwapNoOneInch() internal {
-        //Claim Tru rewards
-        truFarm.claim();
+        //Claim kko rewards
+        _getReward();
         //Swap through sushiswap
         router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-            TRU.balanceOf(address(this)),
+            KKO.balanceOf(address(this)),
             0,
-            getTokenOutPath(address(TRU), address(want)),
+            getTokenOutPath(address(KKO), address(want)),
             address(this),
             block.timestamp
         );
@@ -168,9 +154,9 @@ contract Strategy is BaseStrategy {
 
     //TODO create prepare return for oneinch swap
     function _claimAndSwap(bytes calldata _oneInch) internal {
-        //Claim Tru rewards
-        truFarm.claim();
-        //Swap TRU to USDC,also check the data before doing so
+        //Claim kko rewards
+        _getReward();
+        //Swap KKO to want,also check the data before doing so
         if (_oneInch.length > 0) {
             //Taken from Truefi lending pool code
             uint256 balanceBefore = balanceOfWant();
@@ -183,7 +169,7 @@ contract Strategy is BaseStrategy {
             uint256 balanceDiff = balanceOfWant().sub(balanceBefore);
             require(balanceDiff >= withToleratedSlippage(expectedGain), "Strategy: Not optimal exchange");
 
-            require(swap.srcToken == address(TRU), "Strategy: Invalid srcToken");
+            require(swap.srcToken == address(KKO), "Strategy: Invalid srcToken");
             require(swap.dstToken == address(want), "Strategy: Invalid destToken");
             require(swap.dstReceiver == address(this), "Strategy: Receiver is not strat");
         }
@@ -218,11 +204,11 @@ contract Strategy is BaseStrategy {
 
     /**
      * @dev Get amount out if swapped via router
-     * @param truIn Amount of TRU to swap
+     * @param kkoIn Amount of KKO to swap
      * @return Estimated Output in want
      */
-    function getEstimatedOut(uint256 truIn) internal view returns (uint256) {
-        uint256[] memory amounts = router.getAmountsOut(truIn, getTokenOutPath(address(TRU), address(want)));
+    function getEstimatedOut(uint256 kkoIn) internal view returns (uint256) {
+        uint256[] memory amounts = router.getAmountsOut(kkoIn, getTokenOutPath(address(KKO), address(want)));
         return amounts[amounts.length - 1];
     }
 
@@ -238,10 +224,8 @@ contract Strategy is BaseStrategy {
     function handleProfit() internal returns (uint256 _profit) {
         uint256 balanceOfWantBefore = balanceOfWant();
         if (pendingReward() > 0) _claimAndSwapNoOneInch();
-        uint256 baseProfit = balanceOfWant().sub(balanceOfWantBefore);
         //Subtract deposit fees from profit if we have any left to cover
-        depositFeesToCover = depositFeesToCover > baseProfit ? depositFeesToCover.sub(baseProfit) : 0;
-        _profit = depositFeesToCover > baseProfit ? 0 : baseProfit.sub(depositFeesToCover);
+        _profit = balanceOfWant().sub(balanceOfWantBefore);
     }
 
     function prepareReturn(uint256 _debtOutstanding)
@@ -267,13 +251,7 @@ contract Strategy is BaseStrategy {
         uint256 toInvest = _wantAvailable.sub(_debtOutstanding);
 
         if (toInvest > 0) {
-            //First lend to lender to get lend tokens
-            lender.join(toInvest);
-            //add loss to cover if we get lesser than what we enter with
-            uint256 balLend = balanceOfLendToken();
-            if (balLend < toInvest) depositFeesToCover = depositFeesToCover.add(toInvest.sub(balLend));
-            //Stake those tokens to tru farm for tru rewards
-            truFarm.stake(balanceOfLendToken());
+            _deposit(toInvest);
         }
     }
 
@@ -284,9 +262,7 @@ contract Strategy is BaseStrategy {
         uint256 balanceStaked = balanceOfStake();
         if (_amountNeeded > balanceWant) {
             uint256 amountToWithdraw = (Math.min(balanceStaked, _amountNeeded - balanceWant));
-            // unstake needed amount
-            truFarm.unstake(amountToWithdraw);
-            lender.liquidExit(amountToWithdraw);
+            _withdraw(amountToWithdraw);
         }
         // Since we might free more than needed, let's send back the min
         _liquidatedAmount = Math.min(balanceOfWant(), _amountNeeded);
