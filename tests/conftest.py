@@ -71,10 +71,6 @@ def vault(pm, gov, rewards, guardian, currency):
 
 @pytest.fixture
 def strategy(strategist, keeper, vault, Strategy):
-    strategy = strategist.deploy(
-        Strategy,
-        vault,
-        2
-    )
+    strategy = strategist.deploy(Strategy, vault, 2)
     strategy.setKeeper(keeper)
     yield strategy

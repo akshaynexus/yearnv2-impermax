@@ -67,7 +67,7 @@ def test_operation(
 def sleepAndHarvest(times, strat, gov):
     for i in range(times):
         debugStratData(strat, "Before harvest" + str(i))
-        #Alchemix staking pools calculate reward per block,so mimic mainnet chain flow to get accurate returns
+        # Alchemix staking pools calculate reward per block,so mimic mainnet chain flow to get accurate returns
         for j in range(139):
             chain.sleep(13)
             chain.mine(1)
