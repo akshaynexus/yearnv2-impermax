@@ -1,6 +1,23 @@
 import pytest
 from brownie import config
 
+fixtures = "currency", "whale", "allocConf", "allocChangeConf"
+params = [
+    pytest.param(
+        "0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83",
+        "0x5AA53f03197E08C4851CAD8C92c7922DA5857E5d",
+        [
+            ["0x5dd76071F7b5F4599d4F2B7c08641843B746ace9", 2000],  # FTM-TARROT LP
+            ["0xD05f23002f6d09Cf7b643B69F171cc2A3EAcd0b3", 8000],  # FTM-BOO LP
+        ],
+        [
+            ["0x5dd76071F7b5F4599d4F2B7c08641843B746ace9", 3000],  # FTM-TARROT LP
+            ["0xD05f23002f6d09Cf7b643B69F171cc2A3EAcd0b3", 7000],  # FTM-BOO LP
+        ],
+        id="FTM LP TarrotLender",
+    ),
+]
+
 
 @pytest.fixture
 def andre(accounts):
@@ -48,15 +65,25 @@ def rewards(gov):
 
 
 @pytest.fixture
-def currency(interface):
-    # this one is curvesteth
-    yield interface.ERC20("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+def currency(request, interface):
+    # this one is 3EPS
+    yield interface.ERC20(request.param)
 
 
 @pytest.fixture
-def whale(accounts):
-    # Binance 7,Has alot of 1INCH
-    yield accounts.at("0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503", force=True)
+def whale(request, accounts):
+    acc = accounts.at(request.param, force=True)
+    yield acc
+
+
+@pytest.fixture
+def allocConf(request):
+    yield request.param
+
+
+@pytest.fixture
+def allocChangeConf(request):
+    yield request.param
 
 
 @pytest.fixture
@@ -70,7 +97,7 @@ def vault(pm, gov, rewards, guardian, currency):
 
 
 @pytest.fixture
-def strategy(strategist, keeper, vault, Strategy):
-    strategy = strategist.deploy(Strategy, vault, 2)
+def strategy(strategist, keeper, vault, Strategy, allocConf):
+    strategy = strategist.deploy(Strategy, vault, allocConf)
     strategy.setKeeper(keeper)
     yield strategy

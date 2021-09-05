@@ -4,28 +4,18 @@ from brownie import Wei, accounts, chain
 # reference code taken from yHegic repo and stecrv strat
 # https://github.com/Macarse/yhegic
 # https://github.com/Grandthrax/yearnv2_steth_crv_strat
+import conftest as config
 
 
-@pytest.mark.require_network("mainnet-fork")
-def test_operation(
-    currency,
-    strategy,
-    chain,
-    vault,
-    whale,
-    gov,
-    bob,
-    alice,
-    strategist,
-    guardian,
-    interface,
-):
+@pytest.mark.parametrize(config.fixtures, config.params, indirect=True)
+@pytest.mark.require_network("ftm-main-fork")
+def test_operation(currency, strategy, vault, whale, gov, bob, alice, allocChangeConf):
     # Amount configs
-    test_budget = 888000 * 1e6
-    approve_amount = 1000000 * 1e6
-    deposit_limit = 889000 * 1e6
-    bob_deposit = 100000 * 1e6
-    alice_deposit = 788000 * 1e6
+    test_budget = 888000 * 1e18
+    approve_amount = 1000000 * 1e18
+    deposit_limit = 889000 * 1e18
+    bob_deposit = 100000 * 1e18
+    alice_deposit = 788000 * 1e18
     currency.approve(whale, approve_amount, {"from": whale})
     currency.transferFrom(whale, gov, test_budget, {"from": whale})
 
@@ -42,13 +32,18 @@ def test_operation(
 
     vault.deposit(bob_deposit, {"from": bob})
     vault.deposit(alice_deposit, {"from": alice})
+    # Set locked profit degradation to small amount so pps increases during test
+    vault.setLockedProfitDegration(Wei("0.1 ether"))
     # Sleep and harvest 5 times,approx for 24 hours
     sleepAndHarvest(5, strategy, gov)
+    strategy.changeAllocs(allocChangeConf)
+    sleepAndHarvest(5, strategy, gov)
+
     # We should have made profit or stayed stagnant (This happens when there is no rewards in 1INCH rewards)
-    assert vault.pricePerShare() / 1e6 >= 1
+    assert vault.pricePerShare() / 1e18 >= 1
     # Log estimated APR
-    growthInShares = vault.pricePerShare() - 1e6
-    growthInPercent = (growthInShares / 1e6) * 100
+    growthInShares = vault.pricePerShare() - 1e18
+    growthInPercent = (growthInShares / 1e18) * 100
     growthInPercent = growthInPercent * 24
     growthYearly = growthInPercent * 365
     print(f"Yearly APR :{growthYearly}%")
@@ -61,16 +56,14 @@ def test_operation(
     assert currency.balanceOf(bob) >= bob_deposit
 
     # Make sure it isnt less than 1 after depositors withdrew
-    assert vault.pricePerShare() / 1e6 >= 1
+    assert vault.pricePerShare() / 1e18 >= 1
 
 
 def sleepAndHarvest(times, strat, gov):
     for i in range(times):
         debugStratData(strat, "Before harvest" + str(i))
-        # Alchemix staking pools calculate reward per block,so mimic mainnet chain flow to get accurate returns
-        for j in range(139):
-            chain.sleep(13)
-            chain.mine(1)
+        chain.sleep(21 * 60 * 60)
+        chain.mine(1)
         strat.harvest({"from": gov})
         debugStratData(strat, "After harvest" + str(i))
 
@@ -79,6 +72,9 @@ def sleepAndHarvest(times, strat, gov):
 def debugStratData(strategy, msg):
     print(msg)
     print("Total assets " + str(strategy.estimatedTotalAssets()))
-    print("USDC Balance " + str(strategy.balanceOfWant()))
+    print(
+        str(strategy.BTokenToWant("0x5dd76071F7b5F4599d4F2B7c08641843B746ace9", 1e18))
+    )
+    print("ftm Balance " + str(strategy.balanceOfWant()))
     print("Stake balance " + str(strategy.balanceOfStake()))
-    print("Pending reward " + str(strategy.pendingReward()))
+    print("Pending reward " + str(strategy.pendingInterest()))
