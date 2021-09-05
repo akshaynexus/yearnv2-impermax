@@ -168,6 +168,7 @@ contract Strategy is BaseStrategy {
             require(ILendingPoolToken(_pool).mint(address(this)) >= 0, "No lend tokens minted");
         }
     }
+
     function updateExchangeRates() internal {
         //Update all the rates before harvest
         for (uint256 i = 0; i < alloc.length; i++) {
@@ -175,10 +176,10 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function calculatePTAmount(address _pool,uint _amount) internal returns (uint){
+    function calculatePTAmount(address _pool, uint256 _amount) internal returns (uint256) {
         uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
         uint256 pAmount = WantToBToken(_pool, _amount);
-        if(pAmount > pBal) pAmount = pBal;
+        if (pAmount > pBal) pAmount = pBal;
         return pAmount;
     }
 
@@ -194,12 +195,12 @@ contract Strategy is BaseStrategy {
         uint256 pAmount = calculatePTAmount(_pool, _amount);
         //Extra addition on liquidate position to cover edge cases of a few wei defecit
         ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
-        uint returnedAmount = ILendingPoolToken(_pool).redeem(address(this));
-        if(returnedAmount < _amount) {
+        uint256 returnedAmount = ILendingPoolToken(_pool).redeem(address(this));
+        if (returnedAmount < _amount) {
             //Withdraw all and reinvest remaining
-            uint toCover = _amount.sub(returnedAmount);
+            uint256 toCover = _amount.sub(returnedAmount);
             uint256 pAmount = calculatePTAmount(_pool, _amount);
-            if(pAmount > 0) {
+            if (pAmount > 0) {
                 ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
                 require(ILendingPoolToken(_pool).redeem(address(this)) >= toCover, "Not enough returned");
             }
