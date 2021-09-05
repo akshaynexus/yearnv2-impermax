@@ -32,14 +32,6 @@ contract Strategy is BaseStrategy {
     }
 
     uint256 private constant BASIS_PRECISION = 10000;
-    uint16 public constant TOLERATED_SLIPPAGE = 100; // 1%
-
-    //This adds a few wei extra on withdraw from pool calls
-    uint256 public excessWei = 6;
-    // address private constant weth = address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-
-    // //Sushiswap router has the highest liq by far,so we use this
-    // IUniRouterV2 public router = IUniRouterV2(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
 
     //This records the current pools and allocs
     PoolAlloc[] alloc;
@@ -176,22 +168,42 @@ contract Strategy is BaseStrategy {
             require(ILendingPoolToken(_pool).mint(address(this)) >= 0, "No lend tokens minted");
         }
     }
+    function updateExchangeRates() internal {
+        //Update all the rates before harvest
+        for (uint256 i = 0; i < alloc.length; i++) {
+            ILendingPool(alloc[i].pool).exchangeRate();
+        }
+    }
+
+    function calculatePTAmount(address _pool,uint _amount) internal returns (uint){
+        uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
+        uint256 pAmount = WantToBToken(_pool, _amount);
+        if(pAmount > pBal) pAmount = pBal;
+        return pAmount;
+    }
 
     function _withdrawFrom(address _pool) internal {
         uint256 pAmount = ILendingPoolToken(_pool).balanceOf(address(this));
         ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
-        require(ILendingPoolToken(_pool).redeem(address(this)) >= 0, "Not enough returned");
+        require(ILendingPoolToken(_pool).redeem(address(this)) > 0, "Not enough returned");
     }
 
     function withdrawFromPool(address _pool, uint256 _amount) internal {
         uint256 liqAvail = want.balanceOf(_pool);
         _amount = Math.min(_amount, liqAvail);
-        uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
-        uint256 pAmount = WantToBToken(_pool, _amount);
+        uint256 pAmount = calculatePTAmount(_pool, _amount);
         //Extra addition on liquidate position to cover edge cases of a few wei defecit
-        if (pAmount < pBal && pAmount + excessWei < pBal) pAmount += excessWei;
         ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
-        require(ILendingPoolToken(_pool).redeem(address(this)) >= _amount, "Not enough returned");
+        uint returnedAmount = ILendingPoolToken(_pool).redeem(address(this));
+        if(returnedAmount < _amount) {
+            //Withdraw all and reinvest remaining
+            uint toCover = _amount.sub(returnedAmount);
+            uint256 pAmount = calculatePTAmount(_pool, _amount);
+            if(pAmount > 0) {
+                ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
+                require(ILendingPoolToken(_pool).redeem(address(this)) >= toCover, "Not enough returned");
+            }
+        }
     }
 
     function _deposit(uint256 _depositAmount) internal {
@@ -207,6 +219,8 @@ contract Strategy is BaseStrategy {
     }
 
     function _withdraw(uint256 _withdrawAmount) internal {
+        //Update before trying to withdraw
+        updateExchangeRates();
         for (uint256 i = 0; i < alloc.length; i++) {
             withdrawFromPool(alloc[i].pool, calculateAllocFromBal(_withdrawAmount, alloc[i].alloc));
         }
@@ -271,11 +285,7 @@ contract Strategy is BaseStrategy {
 
     function handleProfit() internal returns (uint256 _profit) {
         uint256 balanceOfWantBefore = balanceOfWant();
-        //Update all the rates before harvest
-        for (uint256 i = 0; i < alloc.length; i++) {
-            ILendingPool(alloc[i].pool).exchangeRate();
-        }
-
+        updateExchangeRates();
         _profit = balanceOfWant().sub(balanceOfWantBefore);
     }
 
@@ -330,10 +340,6 @@ contract Strategy is BaseStrategy {
     function prepareMigration(address _newStrategy) internal override {
         // If we have pending rewards,take that out
         _withdrawAll();
-    }
-
-    function setExcessWei(uint256 _newWei) external onlyStrategist {
-        excessWei = _newWei;
     }
 
     // Override this to add all tokens/tokenized positions this contract manages
