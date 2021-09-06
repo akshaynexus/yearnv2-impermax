@@ -34,7 +34,7 @@ contract Strategy is BaseStrategy {
     uint256 private constant BASIS_PRECISION = 10000;
 
     //This records the current pools and allocs
-    PoolAlloc[] alloc;
+    PoolAlloc[] public alloc;
 
     event Cloned(address indexed clone);
 
