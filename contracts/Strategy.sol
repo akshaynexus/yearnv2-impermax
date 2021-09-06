@@ -11,7 +11,7 @@ import {SafeERC20, SafeMath, IERC20, Address} from "@openzeppelin/contracts/toke
 import "@openzeppelin/contracts/math/Math.sol";
 
 // Import interfaces for many popular DeFi projects, or add your own!
-import "../interfaces/IUniRouterV2.sol";
+import "../interfaces/IUniswapV2Router02.sol";
 import "../interfaces/ILendingPool.sol";
 
 interface ILendingPoolToken is ILendingPool, IERC20 {}
@@ -32,6 +32,13 @@ contract Strategy is BaseStrategy {
     }
 
     uint256 private constant BASIS_PRECISION = 10000;
+    
+    uint256 public minProfit;
+    uint256 public minCredit;
+
+    //Spookyswap as default
+    IUniswapV2Router02 router = IUniswapV2Router02(0xF491e7B69E4244ad4002BC14e878a34207E38c29);
+    address weth = router.WETH();
 
     //This records the current pools and allocs
     PoolAlloc[] public alloc;
@@ -140,18 +147,17 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function pendingInterestUpdated() public view returns (uint256) {
-        uint256 debt = vault.strategies(address(this)).totalDebt;
-        uint256 LendBal = balanceOfStake();
-        if (debt < LendBal) {
-            //This will add to profit
-            return LendBal.sub(debt);
-        }
-    }
-
     function estimatedTotalAssets() public view override returns (uint256) {
         //Add the want balance and staked balance
         return balanceOfWant().add(balanceOfStake());
+    }
+
+    function tendTrigger(uint256 callCostInWei) public view virtual override returns (bool) {
+        return balanceOfWant() > minCredit;
+    }
+
+    function harvestTrigger(uint256 callCostInWei) public view virtual override returns (bool) {
+        return pendingInterest()  > minProfit || vault.creditAvailable() > minCredit;
     }
 
     function checkAllocTotal(PoolAlloc[] memory _alloc) internal pure returns (bool) {
@@ -176,11 +182,10 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function calculatePTAmount(address _pool, uint256 _amount) internal returns (uint256) {
+    function calculatePTAmount(address _pool, uint256 _amount) internal returns (uint256 pAmount) {
         uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
-        uint256 pAmount = WantToBToken(_pool, _amount);
+        pAmount = WantToBToken(_pool, _amount);
         if (pAmount > pBal) pAmount = pBal;
-        return pAmount;
     }
 
     function _withdrawFrom(address _pool) internal {
@@ -193,13 +198,16 @@ contract Strategy is BaseStrategy {
         uint256 liqAvail = want.balanceOf(_pool);
         _amount = Math.min(_amount, liqAvail);
         uint256 pAmount = calculatePTAmount(_pool, _amount);
-        //Extra addition on liquidate position to cover edge cases of a few wei defecit
-        ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
-        uint256 returnedAmount = ILendingPoolToken(_pool).redeem(address(this));
+        uint256 returnedAmount;
+        if(pAmount > 0) {
+            //Extra addition on liquidate position to cover edge cases of a few wei defecit
+            ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
+            returnedAmount = ILendingPoolToken(_pool).redeem(address(this));
+        }
         if (returnedAmount < _amount) {
             //Withdraw all and reinvest remaining
             uint256 toCover = _amount.sub(returnedAmount);
-            uint256 pAmount = calculatePTAmount(_pool, _amount);
+            pAmount = calculatePTAmount(_pool, _amount);
             if (pAmount > 0) {
                 ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
                 require(ILendingPoolToken(_pool).redeem(address(this)) >= toCover, "Not enough returned");
@@ -299,9 +307,9 @@ contract Strategy is BaseStrategy {
             uint256 _debtPayment
         )
     {
-        (_debtPayment, _loss) = returnDebtOutstanding(_debtOutstanding);
         _profit = handleProfit();
         uint256 interest = pendingInterest();
+        (_debtPayment, _loss) = returnDebtOutstanding(_debtOutstanding);
         uint256 balanceAfter = balanceOfWant();
         _profit += interest;
         uint256 requiredWantBal = _profit + _debtPayment;
@@ -337,10 +345,38 @@ contract Strategy is BaseStrategy {
         // Since we might free more than needed, let's send back the min
         _liquidatedAmount = Math.min(balanceOfWant(), _amountNeeded);
     }
+    function getTokenOutPath(address _token_in, address _token_out)
+        internal
+        view
+        returns (address[] memory _path)
+    {
+        bool is_weth =
+            _token_in == address(weth) || _token_out == address(weth);
+        _path = new address[](is_weth ? 2 : 3);
+        _path[0] = _token_in;
+        if (is_weth) {
+            _path[1] = _token_out;
+        } else {
+            _path[1] = address(weth);
+            _path[2] = _token_out;
+        }
+    }
+    function quote(address _in,address _out, uint _amtIn) internal view returns (uint) {
+        address[] memory path = getTokenOutPath(_in,_out);
+        return router.getAmountsOut(_amtIn, path)[path.length-1];
+    }
 
     function prepareMigration(address _newStrategy) internal override {
-        // If we have pending rewards,take that out
         _withdrawAll();
+    }
+
+    function liquidateAllPositions() internal virtual override returns (uint256 _amountFreed) {
+        _withdrawAll();
+        _amountFreed =  balanceOfWant();
+    }
+
+    function ethToWant(uint256 _amtInWei) public view virtual override returns (uint256) {
+        return address(want) == address(weth) ?  _amtInWei : quote(weth,address(want),_amtInWei);
     }
 
     // Override this to add all tokens/tokenized positions this contract manages
