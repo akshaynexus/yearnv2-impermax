@@ -239,7 +239,7 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function changeAllocs(PoolAlloc[] memory _newAlloc) external onlyStrategist {
+    function changeAllocs(PoolAlloc[] memory _newAlloc) external onlyGovernance {
         // Withdraw from all positions currently allocated
         if (balanceOfStake() > 0) {
             _withdrawAll();
