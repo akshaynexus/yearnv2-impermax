@@ -32,7 +32,7 @@ contract Strategy is BaseStrategy {
     }
 
     uint256 private constant BASIS_PRECISION = 10000;
-    
+
     uint256 public minProfit;
     uint256 public minCredit;
 
@@ -157,7 +157,7 @@ contract Strategy is BaseStrategy {
     }
 
     function harvestTrigger(uint256 callCostInWei) public view virtual override returns (bool) {
-        return pendingInterest()  > minProfit || vault.creditAvailable() > minCredit;
+        return pendingInterest() > minProfit || vault.creditAvailable() > minCredit;
     }
 
     function checkAllocTotal(PoolAlloc[] memory _alloc) internal pure returns (bool) {
@@ -199,7 +199,7 @@ contract Strategy is BaseStrategy {
         _amount = Math.min(_amount, liqAvail);
         uint256 pAmount = calculatePTAmount(_pool, _amount);
         uint256 returnedAmount;
-        if(pAmount > 0) {
+        if (pAmount > 0) {
             //Extra addition on liquidate position to cover edge cases of a few wei defecit
             ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
             returnedAmount = ILendingPoolToken(_pool).redeem(address(this));
@@ -345,13 +345,9 @@ contract Strategy is BaseStrategy {
         // Since we might free more than needed, let's send back the min
         _liquidatedAmount = Math.min(balanceOfWant(), _amountNeeded);
     }
-    function getTokenOutPath(address _token_in, address _token_out)
-        internal
-        view
-        returns (address[] memory _path)
-    {
-        bool is_weth =
-            _token_in == address(weth) || _token_out == address(weth);
+
+    function getTokenOutPath(address _token_in, address _token_out) internal view returns (address[] memory _path) {
+        bool is_weth = _token_in == address(weth) || _token_out == address(weth);
         _path = new address[](is_weth ? 2 : 3);
         _path[0] = _token_in;
         if (is_weth) {
@@ -361,9 +357,14 @@ contract Strategy is BaseStrategy {
             _path[2] = _token_out;
         }
     }
-    function quote(address _in,address _out, uint _amtIn) internal view returns (uint) {
-        address[] memory path = getTokenOutPath(_in,_out);
-        return router.getAmountsOut(_amtIn, path)[path.length-1];
+
+    function quote(
+        address _in,
+        address _out,
+        uint256 _amtIn
+    ) internal view returns (uint256) {
+        address[] memory path = getTokenOutPath(_in, _out);
+        return router.getAmountsOut(_amtIn, path)[path.length - 1];
     }
 
     function prepareMigration(address _newStrategy) internal override {
@@ -372,11 +373,11 @@ contract Strategy is BaseStrategy {
 
     function liquidateAllPositions() internal virtual override returns (uint256 _amountFreed) {
         _withdrawAll();
-        _amountFreed =  balanceOfWant();
+        _amountFreed = balanceOfWant();
     }
 
     function ethToWant(uint256 _amtInWei) public view virtual override returns (uint256) {
-        return address(want) == address(weth) ?  _amtInWei : quote(weth,address(want),_amtInWei);
+        return address(want) == address(weth) ? _amtInWei : quote(weth, address(want), _amtInWei);
     }
 
     // Override this to add all tokens/tokenized positions this contract manages
