@@ -36,7 +36,7 @@ def test_operation(currency, strategy, vault, whale, gov, bob, alice, allocChang
     vault.setLockedProfitDegradation(Wei("1 ether"))
     # Sleep and harvest 5 times,approx for 24 hours
     sleepAndHarvest(5, strategy, gov)
-    strategy.changeAllocs(allocChangeConf,{'from':gov})
+    strategy.changeAllocs(allocChangeConf, {"from": gov})
     sleepAndHarvest(5, strategy, gov)
 
     # We should have made profit or stayed stagnant (This happens when there is no rewards in 1INCH rewards)
@@ -47,24 +47,24 @@ def test_operation(currency, strategy, vault, whale, gov, bob, alice, allocChang
     growthInPercent = growthInPercent * 24
     growthYearly = growthInPercent * 365
     print(f"Yearly APR :{growthYearly}%")
-    #Check before pending interest test
+    # Check before pending interest test
     # assert strategy.estimatedTotalAssets() >= vault.totalAssets() + currency.balanceOf(vault)
-     # Set debt ratio to lower than 100%
+    # Set debt ratio to lower than 100%
     vault.updateStrategyDebtRatio(strategy, 9_800, {"from": gov})
-    chain.sleep(12*60*60)
+    chain.sleep(12 * 60 * 60)
     chain.mine(1)
     # Withdraws should not fail
     vault.withdraw(alice_deposit, {"from": alice})
     # Try harvesting again,this should work
     strategy.harvest({"from": gov})
-    #check asset balances again after pendinginterestprofit is added on harvest
+    # check asset balances again after pendinginterestprofit is added on harvest
     # assert strategy.estimatedTotalAssets() >= vault.totalAssets()
 
     vault.withdraw(bob_deposit, {"from": bob})
-    #Check if all users and funds can be withdrawn from vault
-    vault.transferFrom(strategy,gov,vault.balanceOf(strategy),{'from':gov})
-    vault.withdraw(vault.balanceOf(gov),{'from':gov})
-    #Make sure all the funds are taken from vault
+    # Check if all users and funds can be withdrawn from vault
+    vault.transferFrom(strategy, gov, vault.balanceOf(strategy), {"from": gov})
+    vault.withdraw(vault.balanceOf(gov), {"from": gov})
+    # Make sure all the funds are taken from vault
     assert vault.totalSupply() == 0
     # # Withdraws should not fail
     # vault.withdraw(alice_deposit, {"from": alice})

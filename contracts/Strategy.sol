@@ -123,19 +123,15 @@ contract Strategy is BaseStrategy {
         bal = BTokenToWant(_pool, ILendingPoolToken(_pool).balanceOf(address(this)));
     }
 
-    function getTotalInPools() internal view returns (uint256 total) {
-        for (uint256 i = 0; i < alloc.length; i++) {
-            total = total.add(balanceInPool(alloc[i].pool));
-        }
-    }
-
     function balanceOfWant() public view returns (uint256) {
         return want.balanceOf(address(this));
     }
 
     //Returns staked value
-    function balanceOfStake() public view returns (uint256) {
-        return getTotalInPools();
+    function balanceOfStake() public view returns (uint256 total) {
+        for (uint256 i = 0; i < alloc.length; i++) {
+            total = total.add(balanceInPool(alloc[i].pool));
+        }
     }
 
     function pendingInterest() public view returns (uint256) {
@@ -237,7 +233,7 @@ contract Strategy is BaseStrategy {
 
     function revokeApprovals() internal {
         for (uint256 i = 0; i < alloc.length; i++) {
-            if (want.allowance(address(this), alloc[i].pool) > 0) want.approve(alloc[i].pool, 0);
+            want.approve(alloc[i].pool, 0);
         }
     }
 
@@ -245,6 +241,14 @@ contract Strategy is BaseStrategy {
         for (uint256 i = 0; i < alloc.length; i++) {
             if (want.allowance(address(this), alloc[i].pool) == 0) want.approve(alloc[i].pool, type(uint256).max);
         }
+    }
+
+    function updateMinProfit(uint256 _minProfit) external onlyStrategist {
+        minProfit = _minProfit;
+    }
+
+    function updateMinCredit(uint256 _minCredit) external onlyStrategist {
+        minCredit = _minCredit;
     }
 
     function changeAllocs(PoolAlloc[] memory _newAlloc) external onlyGovernance {
@@ -271,17 +275,6 @@ contract Strategy is BaseStrategy {
     function calculateAllocFromBal(uint256 _bal, uint256 _allocPoints) internal pure returns (uint256) {
         return _bal.mul(_allocPoints).div(BASIS_PRECISION);
     }
-
-    /*
-    function rebalance() external onlyStrategist {
-        for(uint i=0;i<alloc.length;i++) {
-            uint poolBal = balanceInPool(alloc[i].pool);
-            uint expectedBalance = calculateAllocFromBal(balanceOfStake(), alloc[i].alloc);
-            if(poolBal > expectedBalance) withdrawFromPool(alloc[i].pool, poolBal.sub(expectedBalance));
-            if(poolBal < expectedBalance) depositToPool(alloc[i].pool, Math.min(balanceOfWant(), expectedBalance.sub(poolBal)));
-        }
-    }
-    */
 
     function returnDebtOutstanding(uint256 _debtOutstanding) internal returns (uint256 _debtPayment, uint256 _loss) {
         // We might need to return want to the vault
@@ -344,6 +337,7 @@ contract Strategy is BaseStrategy {
         }
         // Since we might free more than needed, let's send back the min
         _liquidatedAmount = Math.min(balanceOfWant(), _amountNeeded);
+        _loss = _amountNeeded > _liquidatedAmount ? _amountNeeded.sub(_liquidatedAmount) : 0;
     }
 
     function getTokenOutPath(address _token_in, address _token_out) internal view returns (address[] memory _path) {
