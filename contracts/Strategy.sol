@@ -104,7 +104,7 @@ contract Strategy is BaseStrategy {
         return "StrategyTarotLender";
     }
 
-    function WantToBToken(address _pool, uint256 _requiredWant) internal view returns (uint256 _amount) {
+    function wantTobToken(address _pool, uint256 _requiredWant) internal view returns (uint256 _amount) {
         if (_requiredWant == 0) return _requiredWant;
         // This gives us the price per share of xToken
         uint256 pps = ILendingPool(_pool).exchangeRateLast();
@@ -112,7 +112,7 @@ contract Strategy is BaseStrategy {
         _amount = _requiredWant.mul(1e18).div(pps);
     }
 
-    function BTokenToWant(address _pool, uint256 _bBal) public view returns (uint256 _amount) {
+    function bTokenToWant(address _pool, uint256 _bBal) public view returns (uint256 _amount) {
         if (_bBal == 0) return _bBal;
         // This gives us the price per share of xToken
         uint256 pps = ILendingPool(_pool).exchangeRateLast();
@@ -120,7 +120,7 @@ contract Strategy is BaseStrategy {
     }
 
     function balanceInPool(address _pool) internal view returns (uint256 bal) {
-        bal = BTokenToWant(_pool, ILendingPoolToken(_pool).balanceOf(address(this)));
+        bal = bTokenToWant(_pool, ILendingPoolToken(_pool).balanceOf(address(this)));
     }
 
     function balanceOfWant() public view returns (uint256) {
@@ -180,7 +180,7 @@ contract Strategy is BaseStrategy {
 
     function calculatePTAmount(address _pool, uint256 _amount) internal returns (uint256 pAmount) {
         uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
-        pAmount = WantToBToken(_pool, _amount);
+        pAmount = wantTobToken(_pool, _amount);
         if (pAmount > pBal) pAmount = pBal;
     }
 
