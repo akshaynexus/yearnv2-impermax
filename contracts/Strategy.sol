@@ -136,10 +136,10 @@ contract Strategy is BaseStrategy {
 
     function pendingInterest() public view returns (uint256) {
         uint256 debt = vault.strategies(address(this)).totalDebt;
-        uint256 LendBal = balanceOfStake();
-        if (debt < LendBal) {
+        uint256 lendBal = balanceOfStake();
+        if (debt < lendBal) {
             //This will add to profit
-            return LendBal.sub(debt);
+            return lendBal.sub(debt);
         }
     }
 
