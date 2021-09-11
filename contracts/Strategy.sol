@@ -289,6 +289,7 @@ contract Strategy is BaseStrategy {
         uint256 balanceOfWantBefore = balanceOfWant();
         updateExchangeRates();
         _profit = balanceOfWant().sub(balanceOfWantBefore);
+        _profit += pendingInterest();
     }
 
     function prepareReturn(uint256 _debtOutstanding)
@@ -300,11 +301,9 @@ contract Strategy is BaseStrategy {
             uint256 _debtPayment
         )
     {
-        _profit = handleProfit();
-        uint256 interest = pendingInterest();
         (_debtPayment, _loss) = returnDebtOutstanding(_debtOutstanding);
+        _profit = handleProfit();
         uint256 balanceAfter = balanceOfWant();
-        _profit += interest;
         uint256 requiredWantBal = _profit + _debtPayment;
         if (balanceAfter < requiredWantBal) {
             //Withdraw enough to satisfy profit check
