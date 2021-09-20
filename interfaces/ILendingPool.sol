@@ -5,6 +5,8 @@ interface ILendingPool {
 
     function exchangeRateLast() external view returns (uint256);
 
+    function collateral() external view returns (address);
+
     function mint(address minter) external returns (uint256);
 
     function redeem(address redeemer) external returns (uint256);

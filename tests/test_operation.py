@@ -92,7 +92,7 @@ def debugStratData(strategy, msg):
     print(msg)
     print("Total assets " + str(strategy.estimatedTotalAssets()))
     print(
-        str(strategy.BTokenToWant("0x5dd76071F7b5F4599d4F2B7c08641843B746ace9", 1e18))
+        str(strategy.bTokenToWant("0x5dd76071F7b5F4599d4F2B7c08641843B746ace9", 1e18))
     )
     print("ftm Balance " + str(strategy.balanceOfWant()))
     print("Stake balance " + str(strategy.balanceOfStake()))
