@@ -38,7 +38,6 @@ contract Strategy is BaseStrategy {
 
     // This toggles the withdraw fuction to withdraw as much as possible from all pools instead of alloc based withdraw
     bool public optimalWithdraw;
-    bool public adjustPositionOnWithdraw;
 
     //Spookyswap as default
     IUniswapV2Router02 router;
@@ -66,6 +65,7 @@ contract Strategy is BaseStrategy {
         weth = router.WETH();
         //By default use optimalWithdraw
         optimalWithdraw = true;
+        adjustPositionOnWithdraw = true;
         _setAlloc(_alloc);
         addApprovals();
     }
@@ -166,11 +166,15 @@ contract Strategy is BaseStrategy {
         return pendingInterest() > minProfit || vault.creditAvailable() > minCredit;
     }
 
+    function getTotalPools() external view returns (uint) {
+        return alloc.length;
+    }
+
     function getWithdrawableFromPools() public view returns (uint256[] memory availableAmounts) {
         availableAmounts = new uint256[](alloc.length);
         for (uint256 i = 0; i < alloc.length; i++) {
-            uint256 liqAvail = want.balanceOf(_pool);
-            uint256 deposited = balanceInPool(_pool);
+            uint256 liqAvail = want.balanceOf(alloc[i].pool);
+            uint256 deposited = balanceInPool(alloc[i].pool);
             availableAmounts[i] = Math.min(deposited, liqAvail);
         }
     }
@@ -241,7 +245,7 @@ contract Strategy is BaseStrategy {
     }
 
     function _withdrawOptimal(uint256 _amount) internal {
-        uint256[] _availableLiq = getWithdrawableFromPools();
+        uint256[] memory _availableLiq = getWithdrawableFromPools();
         uint256 _remainingToWithdraw = _amount;
         for (uint256 i = 0; i < _availableLiq.length && _remainingToWithdraw > 0; i++) {
             //Withdraw from pool if there is enough liq
@@ -258,7 +262,7 @@ contract Strategy is BaseStrategy {
 
     function _deposit(uint256 _depositAmount) internal {
         for (uint256 i = 0; i < alloc.length; i++) {
-            _depositToPool(alloc[i].pool, calculateAllocFromBal(_depositAmount, alloc[i].alloc));
+            _depositToPool(alloc[i].pool, _calculateAllocFromBal(_depositAmount, alloc[i].alloc));
         }
     }
 
@@ -274,8 +278,8 @@ contract Strategy is BaseStrategy {
         if (optimalWithdraw) {
             _withdrawOptimal(_withdrawAmount);
         } else {
-            for (uint256 i = 0; i < alloc.length; i++) {
-                _withdrawFromPool(alloc[i].pool, calculateAllocFromBal(_withdrawAmount, alloc[i].alloc));
+            for (uint256 i = 0; i < alloc.length && balanceOfWant() < _withdrawAmount; i++) {
+                _withdrawFromPool(alloc[i].pool, _calculateAllocFromBal(_withdrawAmount, alloc[i].alloc));
             }
         }
     }
@@ -304,10 +308,6 @@ contract Strategy is BaseStrategy {
         optimalWithdraw = !optimalWithdraw;
     }
 
-    function toggleAdjPositionOnwithdraw() external onlyAuthorized {
-        adjustPositionOnWithdraw = !adjustPositionOnWithdraw;
-    }
-
     function changeAllocs(PoolAlloc[] memory _newAlloc) external onlyGovernance {
         uint256 balStake = balanceOfStake();
         // Withdraw from all positions currently allocated
@@ -315,7 +315,7 @@ contract Strategy is BaseStrategy {
             _withdrawAll();
             revokeApprovals();
         }
-        require(_checkAllocTotal(_newAlloc), "Alloc total shouldnt be more than 10000");
+        require(_checkAllocTotal(_newAlloc), "!alloc");
 
         _setAlloc(_newAlloc);
         addApprovals();
@@ -328,7 +328,7 @@ contract Strategy is BaseStrategy {
         bool depositAfter //Set this to false when its reallocation of current conf
     ) external onlyGovernance {
         uint256 balStake = balanceOfStake();
-        uint256[] availLiq = getWithdrawableFromPools();
+        uint256[] memory availLiq = getWithdrawableFromPools();
         // Withdraw from all positions currently allocated
         if (withdrawFirst && balStake > 0 && balStake <= getMaxWithdrawable()) {
             _withdrawAll();
@@ -340,16 +340,16 @@ contract Strategy is BaseStrategy {
                     uint256 WithdrawAlloc = _newAlloc[i].alloc < alloc[i].alloc ? alloc[i].alloc.sub(_newAlloc[i].alloc) : 0;
                     uint256 depositAlloc = _newAlloc[i].alloc > alloc[i].alloc ? _newAlloc[i].alloc.sub(alloc[i].alloc) : 0;
                     if (WithdrawAlloc > 0) {
-                        _withdrawFromPool(alloc[i].pool, Math.min(calculateAllocFromBal(balStake, WithdrawAlloc), availLiq[i]));
+                        _withdrawFromPool(alloc[i].pool, Math.min(_calculateAllocFromBal(balStake, WithdrawAlloc), availLiq[i]));
                     }
                     if (depositAlloc > 0) {
-                        _depositToPool(alloc[i].pool, Math.min(calculateAllocFromBal(balStake, depositAlloc), balanceOfWant()));
+                        _depositToPool(alloc[i].pool, Math.min(_calculateAllocFromBal(balStake, depositAlloc), balanceOfWant()));
                     }
                 }
             }
         }
 
-        require(_checkAllocTotal(_newAlloc), "Alloc total shouldnt be more than 10000");
+        require(_checkAllocTotal(_newAlloc), "!alloc");
 
         _setAlloc(_newAlloc);
         addApprovals();
@@ -372,7 +372,7 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function calculateAllocFromBal(uint256 _bal, uint256 _allocPoints) internal pure returns (uint256) {
+    function _calculateAllocFromBal(uint256 _bal, uint256 _allocPoints) internal pure returns (uint256) {
         return _bal.mul(_allocPoints).div(BASIS_PRECISION);
     }
 
@@ -437,8 +437,6 @@ contract Strategy is BaseStrategy {
         // Since we might free more than needed, let's send back the min
         _liquidatedAmount = Math.min(balanceOfWant(), _amountNeeded);
         _loss = _amountNeeded > _liquidatedAmount ? _amountNeeded.sub(_liquidatedAmount) : 0;
-        //This is so that excess returned on withdraw is deposited back into pools
-        if(adjustPositionOnWithdraw) adjustPosition(vault.debtOutstanding());
     }
 
     function getTokenOutPath(address _token_in, address _token_out) internal view returns (address[] memory _path) {
