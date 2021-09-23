@@ -65,7 +65,6 @@ contract Strategy is BaseStrategy {
         weth = router.WETH();
         //By default use optimalWithdraw
         optimalWithdraw = true;
-        adjustPositionOnWithdraw = true;
         _setAlloc(_alloc);
         addApprovals();
     }
