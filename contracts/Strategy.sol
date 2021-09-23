@@ -36,9 +36,13 @@ contract Strategy is BaseStrategy {
     uint256 public minProfit;
     uint256 public minCredit;
 
+    // This toggles the withdraw fuction to withdraw as much as possible from all pools instead of alloc based withdraw
+    bool public optimalWithdraw;
+    bool public adjustPositionOnWithdraw;
+
     //Spookyswap as default
-    IUniswapV2Router02 router = IUniswapV2Router02(0xF491e7B69E4244ad4002BC14e878a34207E38c29);
-    address weth = router.WETH();
+    IUniswapV2Router02 router;
+    address weth;
 
     //This records the current pools and allocs
     PoolAlloc[] public alloc;
@@ -53,9 +57,15 @@ contract Strategy is BaseStrategy {
         // You can set these parameters on deployment to whatever you want
         maxReportDelay = 6300;
         profitFactor = 1500;
-        uint256 _decimals = IERC20Extended(address(want)).decimals();
         debtThreshold = 1_000_000 * 1e18;
-        require(checkAllocTotal(_alloc), "Alloc total shouldnt be more than 10000");
+
+        require(_checkAllocTotal(_alloc), "Alloc total shouldnt be more than 10000");
+
+        //Spookyswap router
+        router = IUniswapV2Router02(0xF491e7B69E4244ad4002BC14e878a34207E38c29);
+        weth = router.WETH();
+        //By default use optimalWithdraw
+        optimalWithdraw = true;
         _setAlloc(_alloc);
         addApprovals();
     }
@@ -156,15 +166,32 @@ contract Strategy is BaseStrategy {
         return pendingInterest() > minProfit || vault.creditAvailable() > minCredit;
     }
 
-    function checkAllocTotal(PoolAlloc[] memory _alloc) internal pure returns (bool) {
+    function getWithdrawableFromPools() public view returns (uint256[] memory availableAmounts) {
+        availableAmounts = new uint256[](alloc.length);
+        for (uint256 i = 0; i < alloc.length; i++) {
+            uint256 liqAvail = want.balanceOf(_pool);
+            uint256 deposited = balanceInPool(_pool);
+            availableAmounts[i] = Math.min(deposited, liqAvail);
+        }
+    }
+
+    function getMaxWithdrawable() public view returns (uint256 liquidity) {
+        uint256[] memory availableAmounts = getWithdrawableFromPools();
+        for (uint256 i = 0; i < availableAmounts.length; i++) {
+            liquidity += availableAmounts[i];
+        }
+    }
+
+    function _checkAllocTotal(PoolAlloc[] memory _alloc) internal pure returns (bool) {
         uint256 total = 0;
         for (uint256 i = 0; i < _alloc.length; i++) {
             total += _alloc[i].alloc;
         }
-        return total <= BASIS_PRECISION;
+        //Check total alloc is 100%
+        return total == BASIS_PRECISION;
     }
 
-    function depositToPool(address _pool, uint256 _amount) internal {
+    function _depositToPool(address _pool, uint256 _amount) internal {
         if (_amount > 0) {
             want.safeTransfer(_pool, _amount);
             require(ILendingPoolToken(_pool).mint(address(this)) >= 0, "No lend tokens minted");
@@ -190,11 +217,11 @@ contract Strategy is BaseStrategy {
         require(ILendingPoolToken(_pool).redeem(address(this)) > 0, "Not enough returned");
     }
 
-    function withdrawFromPool(address _pool, uint256 _amount) internal {
+    function _withdrawFromPool(address _pool, uint256 _amount) internal returns (uint256 returnedAmount) {
         uint256 liqAvail = want.balanceOf(_pool);
         _amount = Math.min(_amount, liqAvail);
         uint256 pAmount = calculatePTAmount(_pool, _amount);
-        uint256 returnedAmount;
+        uint balWant = balanceOfWant();
         if (pAmount > 0) {
             //Extra addition on liquidate position to cover edge cases of a few wei defecit
             ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
@@ -209,11 +236,29 @@ contract Strategy is BaseStrategy {
                 require(ILendingPoolToken(_pool).redeem(address(this)) >= toCover, "Not enough returned");
             }
         }
+        //Set true returned amount here
+        returnedAmount = balanceOfWant().sub(balWant);
+    }
+
+    function _withdrawOptimal(uint256 _amount) internal {
+        uint256[] _availableLiq = getWithdrawableFromPools();
+        uint256 _remainingToWithdraw = _amount;
+        for (uint256 i = 0; i < _availableLiq.length && _remainingToWithdraw > 0; i++) {
+            //Withdraw from pool if there is enough liq
+            if (_availableLiq[i] >= _remainingToWithdraw) {
+                uint _amountReturned = _withdrawFromPool(alloc[i].pool, _remainingToWithdraw);
+                _remainingToWithdraw = _amountReturned < _remainingToWithdraw ? _remainingToWithdraw.sub(_amountReturned) : 0;
+            }
+            //Otherwise withdraw all from current pool
+            else {
+                _remainingToWithdraw = _remainingToWithdraw.sub(_withdrawFromPool(alloc[i].pool, _availableLiq[i]));
+            }
+        }
     }
 
     function _deposit(uint256 _depositAmount) internal {
         for (uint256 i = 0; i < alloc.length; i++) {
-            depositToPool(alloc[i].pool, calculateAllocFromBal(_depositAmount, alloc[i].alloc));
+            _depositToPool(alloc[i].pool, calculateAllocFromBal(_depositAmount, alloc[i].alloc));
         }
     }
 
@@ -226,8 +271,12 @@ contract Strategy is BaseStrategy {
     function _withdraw(uint256 _withdrawAmount) internal {
         //Update before trying to withdraw
         updateExchangeRates();
-        for (uint256 i = 0; i < alloc.length; i++) {
-            withdrawFromPool(alloc[i].pool, calculateAllocFromBal(_withdrawAmount, alloc[i].alloc));
+        if (optimalWithdraw) {
+            _withdrawOptimal(_withdrawAmount);
+        } else {
+            for (uint256 i = 0; i < alloc.length; i++) {
+                _withdrawFromPool(alloc[i].pool, calculateAllocFromBal(_withdrawAmount, alloc[i].alloc));
+            }
         }
     }
 
@@ -251,17 +300,68 @@ contract Strategy is BaseStrategy {
         minCredit = _minCredit;
     }
 
+    function toggleOptimalWithdraw() external onlyAuthorized {
+        optimalWithdraw = !optimalWithdraw;
+    }
+
+    function toggleAdjPositionOnwithdraw() external onlyAuthorized {
+        adjustPositionOnWithdraw = !adjustPositionOnWithdraw;
+    }
+
     function changeAllocs(PoolAlloc[] memory _newAlloc) external onlyGovernance {
+        uint256 balStake = balanceOfStake();
         // Withdraw from all positions currently allocated
-        if (balanceOfStake() > 0) {
+        if (balStake > 0 && balStake <= getMaxWithdrawable()) {
             _withdrawAll();
             revokeApprovals();
         }
-        require(checkAllocTotal(_newAlloc), "Alloc total shouldnt be more than 10000");
+        require(_checkAllocTotal(_newAlloc), "Alloc total shouldnt be more than 10000");
 
         _setAlloc(_newAlloc);
         addApprovals();
         _deposit(balanceOfWant());
+    }
+
+    function changeAllocsOpt(
+        bool withdrawFirst, //Set this to false when its reallocation of current conf
+        PoolAlloc[] memory _newAlloc,
+        bool depositAfter //Set this to false when its reallocation of current conf
+    ) external onlyGovernance {
+        uint256 balStake = balanceOfStake();
+        uint256[] availLiq = getWithdrawableFromPools();
+        // Withdraw from all positions currently allocated
+        if (withdrawFirst && balStake > 0 && balStake <= getMaxWithdrawable()) {
+            _withdrawAll();
+            revokeApprovals();
+        } else {
+            //Readjust between current pools
+            for (uint256 i = 0; i < _newAlloc.length; i++) {
+                if (alloc.length == _newAlloc.length && _newAlloc[i].pool == alloc[i].pool && _newAlloc[i].alloc != alloc[i].alloc) {
+                    uint256 WithdrawAlloc = _newAlloc[i].alloc < alloc[i].alloc ? alloc[i].alloc.sub(_newAlloc[i].alloc) : 0;
+                    uint256 depositAlloc = _newAlloc[i].alloc > alloc[i].alloc ? _newAlloc[i].alloc.sub(alloc[i].alloc) : 0;
+                    if (WithdrawAlloc > 0) {
+                        _withdrawFromPool(alloc[i].pool, Math.min(calculateAllocFromBal(balStake, WithdrawAlloc), availLiq[i]));
+                    }
+                    if (depositAlloc > 0) {
+                        _depositToPool(alloc[i].pool, Math.min(calculateAllocFromBal(balStake, depositAlloc), balanceOfWant()));
+                    }
+                }
+            }
+        }
+
+        require(_checkAllocTotal(_newAlloc), "Alloc total shouldnt be more than 10000");
+
+        _setAlloc(_newAlloc);
+        addApprovals();
+        if (depositAfter) _deposit(balanceOfWant());
+    }
+
+    function setAllocManual(PoolAlloc[] memory _newAlloc) external onlyGovernance {
+        _setAlloc(_newAlloc);
+    }
+
+    function withdrawFromPool(address _pool, uint256 amount) external onlyGovernance {
+        _withdrawFromPool(_pool, amount);
     }
 
     function _setAlloc(PoolAlloc[] memory _newAlloc) internal {
@@ -337,6 +437,8 @@ contract Strategy is BaseStrategy {
         // Since we might free more than needed, let's send back the min
         _liquidatedAmount = Math.min(balanceOfWant(), _amountNeeded);
         _loss = _amountNeeded > _liquidatedAmount ? _amountNeeded.sub(_liquidatedAmount) : 0;
+        //This is so that excess returned on withdraw is deposited back into pools
+        if(adjustPositionOnWithdraw) adjustPosition(vault.debtOutstanding());
     }
 
     function getTokenOutPath(address _token_in, address _token_out) internal view returns (address[] memory _path) {
