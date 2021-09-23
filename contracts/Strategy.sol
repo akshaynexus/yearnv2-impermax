@@ -166,7 +166,7 @@ contract Strategy is BaseStrategy {
         return pendingInterest() > minProfit || vault.creditAvailable() > minCredit;
     }
 
-    function getTotalPools() external view returns (uint) {
+    function getTotalPools() external view returns (uint256) {
         return alloc.length;
     }
 
@@ -225,7 +225,7 @@ contract Strategy is BaseStrategy {
         uint256 liqAvail = want.balanceOf(_pool);
         _amount = Math.min(_amount, liqAvail);
         uint256 pAmount = calculatePTAmount(_pool, _amount);
-        uint balWant = balanceOfWant();
+        uint256 balWant = balanceOfWant();
         if (pAmount > 0) {
             //Extra addition on liquidate position to cover edge cases of a few wei defecit
             ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
@@ -250,7 +250,7 @@ contract Strategy is BaseStrategy {
         for (uint256 i = 0; i < _availableLiq.length && _remainingToWithdraw > 0; i++) {
             //Withdraw from pool if there is enough liq
             if (_availableLiq[i] >= _remainingToWithdraw) {
-                uint _amountReturned = _withdrawFromPool(alloc[i].pool, _remainingToWithdraw);
+                uint256 _amountReturned = _withdrawFromPool(alloc[i].pool, _remainingToWithdraw);
                 _remainingToWithdraw = _amountReturned < _remainingToWithdraw ? _remainingToWithdraw.sub(_amountReturned) : 0;
             }
             //Otherwise withdraw all from current pool
