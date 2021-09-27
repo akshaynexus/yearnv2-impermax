@@ -11,9 +11,14 @@ params = [
             ["0xD05f23002f6d09Cf7b643B69F171cc2A3EAcd0b3", 8000],  # FTM-BOO LP
         ],
         [
-            ["0x5dd76071F7b5F4599d4F2B7c08641843B746ace9", 3000],  # FTM-TARROT LP
-            ["0xD05f23002f6d09Cf7b643B69F171cc2A3EAcd0b3", 7000],  # FTM-BOO LP
-        ],
+        ["0x93a97db4fEA1d053C31f0B658b0B87f4b38e105d", 2500],  # FTM-SPIRIT LP Highest apr
+        ["0x7A7dd36BCca42952CC1E67BcA1Be44097fF5b644", 2500],  # FTM-BTC LP Spooky 2nd highest apr
+        ["0x5dd76071F7b5F4599d4F2B7c08641843B746ace9", 1250],  # FTM-TARROT LP Spooky
+        ["0x8C97Dcb6a6b08E8bEECE3D75e918FbC076C094ab", 1250],
+        ["0x6e11aaD63d11234024eFB6f7Be345d1d5b8a8f38", 1000],  # USDC-FTM Spirit
+        ["0x5B80b6e16147bc339e22296184F151262657A327", 1000],  # FTM-CRV LP Spooky
+        ["0xD05f23002f6d09Cf7b643B69F171cc2A3EAcd0b3", 500],  # FTM-BOO LP
+    ],
         id="FTM LP TarrotLender",
     ),
 ]

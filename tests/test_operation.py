@@ -37,14 +37,16 @@ def test_operation(currency, strategy, vault, whale, gov, bob, alice, allocChang
     # Sleep and harvest 5 times,approx for 24 hours
     sleepAndHarvest(5, strategy, gov)
     strategy.changeAllocs(allocChangeConf, {"from": gov})
+    strategy.rebalance(strategy.balanceOfStake() / 2)
     sleepAndHarvest(5, strategy, gov)
-
+    chain.sleep(6*60*60)
+    chain.mine(1)
     # We should have made profit or stayed stagnant (This happens when there is no rewards in 1INCH rewards)
     assert vault.pricePerShare() / 1e18 >= 1
     # Log estimated APR
     growthInShares = vault.pricePerShare() - 1e18
     growthInPercent = (growthInShares / 1e18) * 100
-    growthInPercent = growthInPercent * 24
+    growthInPercent = growthInPercent / 2
     growthYearly = growthInPercent * 365
     print(f"Yearly APR :{growthYearly}%")
     # Check before pending interest test

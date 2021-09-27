@@ -14,11 +14,11 @@ import "@openzeppelin/contracts/math/Math.sol";
 import "../interfaces/IUniswapV2Router02.sol";
 import "../interfaces/ILendingPool.sol";
 
-interface ILendingPoolToken is ILendingPool, IERC20 {}
-
-interface IERC20Extended {
+interface IERC20Extended is IERC20 {
     function decimals() external view returns (uint8);
 }
+
+interface ILendingPoolToken is ILendingPool, IERC20Extended {}
 
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
@@ -32,6 +32,9 @@ contract Strategy is BaseStrategy {
     }
 
     uint256 private constant BASIS_PRECISION = 10000;
+    uint256 internal constant TAROT_MIN_TARGET_UTIL = 7e17; // 70%
+    uint256 internal constant TAROT_MAX_TARGET_UTIL = 8e17; // 80%
+    uint256 internal constant UTIL_PRECISION = 1e18;
 
     uint256 public minProfit;
     uint256 public minCredit;
@@ -132,6 +135,14 @@ contract Strategy is BaseStrategy {
         bal = bTokenToWant(_pool, ILendingPoolToken(_pool).balanceOf(address(this)));
     }
 
+    function _getTotalSuppliedInPool(address _pool) internal view returns (uint256 tSupply) {
+        tSupply = bTokenToWant(_pool, ILendingPoolToken(_pool).totalSupply());
+    }
+
+    function _getBorrowedInPair(address _pool) internal view returns (uint256 tBorrow) {
+        tBorrow = _getTotalSuppliedInPool(_pool).sub(want.balanceOf(_pool));
+    }
+
     function balanceOfWant() public view returns (uint256) {
         return want.balanceOf(address(this));
     }
@@ -194,6 +205,68 @@ contract Strategy is BaseStrategy {
         return total == BASIS_PRECISION;
     }
 
+    // The following utilization helper functions are taken from kashi lending strat,rewritten to support tarot/impermax lending
+    function lendPairUtilization(address _lendingPair, uint256 assetsToDeposit) internal view returns (uint256) {
+        uint256 totalAssets = _getTotalSuppliedInPool(_lendingPair);
+        uint256 totalBorrowAmount = _getBorrowedInPair(_lendingPair);
+        return uint256(totalBorrowAmount).mul(UTIL_PRECISION).div(totalAssets);
+    }
+
+    // highestInterestIndex finds the best pair to invest the given deposit
+    function highestInterestPair(uint256 assetsToDeposit) internal view returns (address _highestPair) {
+        uint256 highestInterest = 0;
+        uint256 highestUtilization = 0;
+
+        for (uint256 i = 0; i < alloc.length; i++) {
+            PoolAlloc memory pool = alloc[i];
+
+            uint256 utilization = lendPairUtilization(pool.pool, assetsToDeposit);
+
+            // A pair is highest (really best) if either
+            //   - It's utilization is higher, and either
+            //     - It is above the max target util
+            //     - The existing choice is below the min util target
+            //   - Compare APR directly only if both are between the min and max
+            if (
+                (utilization > highestUtilization && (utilization > TAROT_MAX_TARGET_UTIL || highestUtilization < TAROT_MIN_TARGET_UTIL)) ||
+                (utilization < TAROT_MAX_TARGET_UTIL &&
+                    utilization > TAROT_MIN_TARGET_UTIL &&
+                    highestUtilization < TAROT_MAX_TARGET_UTIL &&
+                    highestUtilization > TAROT_MIN_TARGET_UTIL)
+            ) {
+                highestUtilization = utilization;
+                _highestPair = pool.pool;
+            }
+        }
+    }
+
+    function lowestInterestPair(uint256 minLiquidShares) internal view returns (address _lowestPair) {
+        uint256 lowestUtilization = UTIL_PRECISION;
+
+        for (uint256 i = 0; i < alloc.length; i++) {
+            PoolAlloc memory pool = alloc[i];
+
+            uint256 utilization = lendPairUtilization(pool.pool, 0);
+
+            // A pair is lowest if either
+            //   - It's utilization is lower, and either
+            //     - It is below the min taget util
+            //     - The existing choice is above the max target util
+            //   - Compare APR directly only if both are between the min and max
+            if (
+                ((utilization < lowestUtilization && (lowestUtilization > TAROT_MAX_TARGET_UTIL || utilization < TAROT_MIN_TARGET_UTIL)) ||
+                    (utilization < TAROT_MAX_TARGET_UTIL &&
+                        utilization > TAROT_MIN_TARGET_UTIL &&
+                        lowestUtilization < TAROT_MAX_TARGET_UTIL &&
+                        lowestUtilization > TAROT_MIN_TARGET_UTIL)) &&
+                want.balanceOf(pool.pool) >= minLiquidShares &&
+                balanceInPool(pool.pool) > 0
+            ) {
+                _lowestPair = pool.pool;
+            }
+        }
+    }
+
     function _depositToPool(address _pool, uint256 _amount) internal {
         if (_amount > 0) {
             want.safeTransfer(_pool, _amount);
@@ -216,8 +289,10 @@ contract Strategy is BaseStrategy {
 
     function _withdrawFrom(address _pool) internal {
         uint256 pAmount = ILendingPoolToken(_pool).balanceOf(address(this));
-        ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
-        require(ILendingPoolToken(_pool).redeem(address(this)) > 0, "Not enough returned");
+        if (pAmount > 0) {
+            ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
+            require(ILendingPoolToken(_pool).redeem(address(this)) > 0, "Not enough returned");
+        }
     }
 
     function _withdrawFromPool(address _pool, uint256 _amount) internal returns (uint256 returnedAmount) {
@@ -243,9 +318,19 @@ contract Strategy is BaseStrategy {
         returnedAmount = balanceOfWant().sub(balWant);
     }
 
+    function _withdrawLowUtil(uint256 _amount) internal returns (uint256 remainingAmount) {
+        address lowestPair = lowestInterestPair(_amount);
+        if (lowestPair != address(0)) {
+            uint256 returnedAmount = _withdrawFromPool(lowestPair, _amount);
+            remainingAmount = returnedAmount >= _amount ? 0 : _amount.sub(returnedAmount);
+        }
+    }
+
     function _withdrawOptimal(uint256 _amount) internal {
         uint256[] memory _availableLiq = getWithdrawableFromPools();
-        uint256 _remainingToWithdraw = _amount;
+        //First try to withdraw from lowest liq pair
+        uint256 _remainingToWithdraw = _withdrawLowUtil(_amount);
+
         for (uint256 i = 0; i < _availableLiq.length && _remainingToWithdraw > 0; i++) {
             //Withdraw from pool if there is enough liq
             if (_availableLiq[i] >= _remainingToWithdraw) {
@@ -260,9 +345,9 @@ contract Strategy is BaseStrategy {
     }
 
     function _deposit(uint256 _depositAmount) internal {
-        for (uint256 i = 0; i < alloc.length; i++) {
-            _depositToPool(alloc[i].pool, _calculateAllocFromBal(_depositAmount, alloc[i].alloc));
-        }
+        //Deposit to highest pair
+        address highestPair = highestInterestPair(_depositAmount);
+        _depositToPool(highestPair, _depositAmount);
     }
 
     function _withdrawAll() internal {
@@ -359,8 +444,27 @@ contract Strategy is BaseStrategy {
         _setAlloc(_newAlloc);
     }
 
-    function withdrawFromPool(address _pool, uint256 amount) external onlyGovernance {
+    function withdrawFromPool(address _pool, uint256 amount) external onlyAuthorized {
         _withdrawFromPool(_pool, amount);
+    }
+
+    function moveFromPool(
+        address _pool,
+        uint256 amount,
+        address _newPool
+    ) external onlyGovernance {
+        _withdrawFromPool(_pool, amount);
+        // Make sure the _newPool is in alloc conf,otherwise withdraws will fail
+        _depositToPool(_newPool, amount);
+    }
+
+    function rebalance(uint256 amountToRebalance) external onlyAuthorized {
+        _withdraw(amountToRebalance);
+        _deposit(amountToRebalance);
+    }
+
+    function withdrawFromLending(uint256 amount) external onlyAuthorized {
+        _withdraw(amount);
     }
 
     function _setAlloc(PoolAlloc[] memory _newAlloc) internal {
