@@ -206,14 +206,14 @@ contract Strategy is BaseStrategy {
     }
 
     // The following utilization helper functions are taken from kashi lending strat,rewritten to support tarot/impermax lending
-    function lendPairUtilization(address _lendingPair, uint256 assetsToDeposit) internal view returns (uint256) {
+    function lendPairUtilization(address _lendingPair, uint256 assetsToDeposit) public view returns (uint256) {
         uint256 totalAssets = _getTotalSuppliedInPool(_lendingPair);
         uint256 totalBorrowAmount = _getBorrowedInPair(_lendingPair);
         return uint256(totalBorrowAmount).mul(UTIL_PRECISION).div(totalAssets);
     }
 
     // highestInterestIndex finds the best pair to invest the given deposit
-    function highestInterestPair(uint256 assetsToDeposit) internal view returns (address _highestPair) {
+    function highestInterestPair(uint256 assetsToDeposit) public view returns (address _highestPair) {
         uint256 highestInterest = 0;
         uint256 highestUtilization = 0;
 
@@ -240,7 +240,7 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function lowestInterestPair(uint256 minLiquidShares) internal view returns (address _lowestPair) {
+    function lowestInterestPair(uint256 minLiquidShares) public view returns (address _lowestPair) {
         uint256 lowestUtilization = UTIL_PRECISION;
 
         for (uint256 i = 0; i < alloc.length; i++) {
@@ -283,15 +283,24 @@ contract Strategy is BaseStrategy {
 
     function calculatePTAmount(address _pool, uint256 _amount) internal returns (uint256 pAmount) {
         uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
-        pAmount = wantTobToken(_pool, _amount);
-        if (pAmount > pBal) pAmount = pBal;
+        //Reduce _amount if avail liq is < _amount
+        _amount = Math.min(_amount,want.balanceOf(_pool));
+        //Reduce pAmount if pAmount > pBal
+        pAmount = Math.min(pBal,wantTobToken(_pool, _amount));
+    }
+    function adjustToLiq(address _pool) internal returns (uint) {
+        uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
+        //Reduce _amount if avail liq is < _amount
+        uint _amount = want.balanceOf(_pool);
+        //Reduce pAmount if pAmount > pBal
+        return Math.min(pBal,wantTobToken(_pool, _amount));
     }
 
-    function _withdrawFrom(address _pool) internal {
-        uint256 pAmount = ILendingPoolToken(_pool).balanceOf(address(this));
+    function _withdrawFrom(address _pool) internal returns (uint returnAmt){
+        uint256 pAmount = adjustToLiq(_pool);
         if (pAmount > 0) {
             ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
-            require(ILendingPoolToken(_pool).redeem(address(this)) > 0, "Not enough returned");
+            returnAmt = ILendingPoolToken(_pool).redeem(address(this));
         }
     }
 
@@ -311,7 +320,7 @@ contract Strategy is BaseStrategy {
             pAmount = calculatePTAmount(_pool, _amount);
             if (pAmount > 0) {
                 ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
-                require(ILendingPoolToken(_pool).redeem(address(this)) >= toCover, "Not enough returned");
+                require(ILendingPoolToken(_pool).redeem(address(this)) >= 0, "Not enough returned");
             }
         }
         //Set true returned amount here
@@ -327,19 +336,20 @@ contract Strategy is BaseStrategy {
     }
 
     function _withdrawOptimal(uint256 _amount) internal {
-        uint256[] memory _availableLiq = getWithdrawableFromPools();
         //First try to withdraw from lowest liq pair
         uint256 _remainingToWithdraw = _withdrawLowUtil(_amount);
 
-        for (uint256 i = 0; i < _availableLiq.length && _remainingToWithdraw > 0; i++) {
+        for (uint256 i = 0; i < alloc.length && _remainingToWithdraw > 0; i++) {
+            uint balInPool = balanceInPool(alloc[i].pool);
+            uint liq = want.balanceOf(alloc[i].pool);
             //Withdraw from pool if there is enough liq
-            if (_availableLiq[i] >= _remainingToWithdraw) {
+            if (liq >= _remainingToWithdraw && balInPool > 0) {
                 uint256 _amountReturned = _withdrawFromPool(alloc[i].pool, _remainingToWithdraw);
                 _remainingToWithdraw = _amountReturned < _remainingToWithdraw ? _remainingToWithdraw.sub(_amountReturned) : 0;
             }
             //Otherwise withdraw all from current pool
-            else {
-                _remainingToWithdraw = _remainingToWithdraw.sub(_withdrawFromPool(alloc[i].pool, _availableLiq[i]));
+            else if (balInPool > 0){
+                _remainingToWithdraw = _remainingToWithdraw.sub(_withdrawFrom(alloc[i].pool));
             }
         }
     }
@@ -460,7 +470,7 @@ contract Strategy is BaseStrategy {
 
     function rebalance(uint256 amountToRebalance) external onlyAuthorized {
         _withdraw(amountToRebalance);
-        _deposit(amountToRebalance);
+        _deposit(balanceOfWant());
     }
 
     function withdrawFromLending(uint256 amount) external onlyAuthorized {
