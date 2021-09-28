@@ -284,19 +284,20 @@ contract Strategy is BaseStrategy {
     function calculatePTAmount(address _pool, uint256 _amount) internal returns (uint256 pAmount) {
         uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
         //Reduce _amount if avail liq is < _amount
-        _amount = Math.min(_amount,want.balanceOf(_pool));
+        _amount = Math.min(_amount, want.balanceOf(_pool));
         //Reduce pAmount if pAmount > pBal
-        pAmount = Math.min(pBal,wantTobToken(_pool, _amount));
-    }
-    function adjustToLiq(address _pool) internal returns (uint) {
-        uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
-        //Reduce _amount if avail liq is < _amount
-        uint _amount = want.balanceOf(_pool);
-        //Reduce pAmount if pAmount > pBal
-        return Math.min(pBal,wantTobToken(_pool, _amount));
+        pAmount = Math.min(pBal, wantTobToken(_pool, _amount));
     }
 
-    function _withdrawFrom(address _pool) internal returns (uint returnAmt){
+    function adjustToLiq(address _pool) internal returns (uint256) {
+        uint256 pBal = ILendingPoolToken(_pool).balanceOf(address(this));
+        //Reduce _amount if avail liq is < _amount
+        uint256 _amount = want.balanceOf(_pool);
+        //Reduce pAmount if pAmount > pBal
+        return Math.min(pBal, wantTobToken(_pool, _amount));
+    }
+
+    function _withdrawFrom(address _pool) internal returns (uint256 returnAmt) {
         uint256 pAmount = adjustToLiq(_pool);
         if (pAmount > 0) {
             ILendingPoolToken(_pool).safeTransfer(_pool, pAmount);
@@ -340,15 +341,15 @@ contract Strategy is BaseStrategy {
         uint256 _remainingToWithdraw = _withdrawLowUtil(_amount);
 
         for (uint256 i = 0; i < alloc.length && _remainingToWithdraw > 0; i++) {
-            uint balInPool = balanceInPool(alloc[i].pool);
-            uint liq = want.balanceOf(alloc[i].pool);
+            uint256 balInPool = balanceInPool(alloc[i].pool);
+            uint256 liq = want.balanceOf(alloc[i].pool);
             //Withdraw from pool if there is enough liq
             if (liq >= _remainingToWithdraw && balInPool > 0) {
                 uint256 _amountReturned = _withdrawFromPool(alloc[i].pool, _remainingToWithdraw);
                 _remainingToWithdraw = _amountReturned < _remainingToWithdraw ? _remainingToWithdraw.sub(_amountReturned) : 0;
             }
             //Otherwise withdraw all from current pool
-            else if (balInPool > 0){
+            else if (balInPool > 0) {
                 _remainingToWithdraw = _remainingToWithdraw.sub(_withdrawFrom(alloc[i].pool));
             }
         }
