@@ -39,9 +39,6 @@ contract Strategy is BaseStrategy {
     uint256 public minProfit;
     uint256 public minCredit;
 
-    // This toggles the withdraw fuction to withdraw as much as possible from all pools instead of alloc based withdraw
-    bool public optimalWithdraw;
-
     //Spookyswap as default
     IUniswapV2Router02 router;
     address weth;
@@ -61,13 +58,11 @@ contract Strategy is BaseStrategy {
         profitFactor = 1500;
         debtThreshold = 1_000_000 * 1e18;
 
-        require(_checkAllocTotal(_alloc), "Alloc total shouldnt be more than 10000");
+        require(_checkAllocTotal(_alloc), "!alloc");
 
         //Spookyswap router
         router = IUniswapV2Router02(0xF491e7B69E4244ad4002BC14e878a34207E38c29);
         weth = router.WETH();
-        //By default use optimalWithdraw
-        optimalWithdraw = true;
         _setAlloc(_alloc);
         addApprovals();
     }
@@ -370,13 +365,7 @@ contract Strategy is BaseStrategy {
     function _withdraw(uint256 _withdrawAmount) internal {
         //Update before trying to withdraw
         updateExchangeRates();
-        if (optimalWithdraw) {
-            _withdrawOptimal(_withdrawAmount);
-        } else {
-            for (uint256 i = 0; i < alloc.length && balanceOfWant() < _withdrawAmount; i++) {
-                _withdrawFromPool(alloc[i].pool, _calculateAllocFromBal(_withdrawAmount, alloc[i].alloc));
-            }
-        }
+        _withdrawOptimal(_withdrawAmount);
     }
 
     function revokeApprovals() internal {
@@ -399,10 +388,6 @@ contract Strategy is BaseStrategy {
         minCredit = _minCredit;
     }
 
-    function toggleOptimalWithdraw() external onlyAuthorized {
-        optimalWithdraw = !optimalWithdraw;
-    }
-
     function changeAllocs(PoolAlloc[] memory _newAlloc) external onlyGovernance {
         uint256 balStake = balanceOfStake();
         // Withdraw from all positions currently allocated
@@ -415,40 +400,6 @@ contract Strategy is BaseStrategy {
         _setAlloc(_newAlloc);
         addApprovals();
         _deposit(balanceOfWant());
-    }
-
-    function changeAllocsOpt(
-        bool withdrawFirst, //Set this to false when its reallocation of current conf
-        PoolAlloc[] memory _newAlloc,
-        bool depositAfter //Set this to false when its reallocation of current conf
-    ) external onlyGovernance {
-        uint256 balStake = balanceOfStake();
-        uint256[] memory availLiq = getWithdrawableFromPools();
-        // Withdraw from all positions currently allocated
-        if (withdrawFirst && balStake > 0 && balStake <= getMaxWithdrawable()) {
-            _withdrawAll();
-            revokeApprovals();
-        } else {
-            //Readjust between current pools
-            for (uint256 i = 0; i < _newAlloc.length; i++) {
-                if (alloc.length == _newAlloc.length && _newAlloc[i].pool == alloc[i].pool && _newAlloc[i].alloc != alloc[i].alloc) {
-                    uint256 WithdrawAlloc = _newAlloc[i].alloc < alloc[i].alloc ? alloc[i].alloc.sub(_newAlloc[i].alloc) : 0;
-                    uint256 depositAlloc = _newAlloc[i].alloc > alloc[i].alloc ? _newAlloc[i].alloc.sub(alloc[i].alloc) : 0;
-                    if (WithdrawAlloc > 0) {
-                        _withdrawFromPool(alloc[i].pool, Math.min(_calculateAllocFromBal(balStake, WithdrawAlloc), availLiq[i]));
-                    }
-                    if (depositAlloc > 0) {
-                        _depositToPool(alloc[i].pool, Math.min(_calculateAllocFromBal(balStake, depositAlloc), balanceOfWant()));
-                    }
-                }
-            }
-        }
-
-        require(_checkAllocTotal(_newAlloc), "!alloc");
-
-        _setAlloc(_newAlloc);
-        addApprovals();
-        if (depositAfter) _deposit(balanceOfWant());
     }
 
     function setAllocManual(PoolAlloc[] memory _newAlloc) external onlyGovernance {
