@@ -162,11 +162,11 @@ contract Strategy is BaseStrategy {
     }
 
     function tendTrigger(uint256 callCostInWei) public view virtual override returns (bool) {
-        return balanceOfWant() > minCredit;
+        return super.tendTrigger(callCostInWei) || balanceOfWant() > minCredit;
     }
 
     function harvestTrigger(uint256 callCostInWei) public view virtual override returns (bool) {
-        return pendingInterest() > minProfit || vault.creditAvailable() > minCredit;
+        return super.harvestTrigger(callCostInWei) || pendingInterest() > minProfit || vault.creditAvailable() > minCredit;
     }
 
     function getTotalPools() external view returns (uint256) {
