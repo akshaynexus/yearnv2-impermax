@@ -189,15 +189,6 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function _checkAllocTotal(PoolAlloc[] memory _alloc) internal pure returns (bool) {
-        uint256 total = 0;
-        for (uint256 i = 0; i < _alloc.length; i++) {
-            total += _alloc[i].pools;
-        }
-        //Check total pools is 100%
-        return total == BASIS_PRECISION;
-    }
-
     // The following utilization helper functions are taken from kashi lending strat,rewritten to support tarot/impermax lending
     function lendPairUtilization(address _lendingPair, uint256 assetsToDeposit) public view returns (uint256) {
         uint256 totalAssets = _getTotalSuppliedInPool(_lendingPair);
