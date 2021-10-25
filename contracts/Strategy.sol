@@ -365,11 +365,11 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function updateMinProfit(uint256 _minProfit) external onlyStrategist {
+    function updateMinProfit(uint256 _minProfit) external onlyAuthorized {
         minProfit = _minProfit;
     }
 
-    function updateMinCredit(uint256 _minCredit) external onlyStrategist {
+    function updateMinCredit(uint256 _minCredit) external onlyAuthorized {
         minCredit = _minCredit;
     }
 
