@@ -40,8 +40,8 @@ contract Strategy is BaseStrategy {
     uint256 public minCredit;
 
     //Spookyswap as default
-    IUniswapV2Router02 router;
-    address weth;
+    IUniswapV2Router02 internal router;
+    address internal weth;
 
     //This records the current pools and allocs
     address[] public pools;
