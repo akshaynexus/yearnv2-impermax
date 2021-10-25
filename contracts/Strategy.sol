@@ -121,7 +121,7 @@ contract Strategy is BaseStrategy {
         if (_bBal == 0) return _bBal;
         // This gives us the price per share of xToken
         uint256 pps = ILendingPool(_pool).exchangeRateLast();
-        _amount = (_bBal * pps) / 1e18;
+        _amount = (_bBal.mul(pps)).div(1e18);
     }
 
     function balanceInPool(address _pool) internal view returns (uint256 bal) {
@@ -211,7 +211,6 @@ contract Strategy is BaseStrategy {
         uint256 highestUtilization = 0;
 
         for (uint256 i = 0; i < pools.length; i++) {
-
             uint256 utilization = lendPairUtilization(pools[i], assetsToDeposit);
 
             // A pair is highest (really best) if either
@@ -236,7 +235,6 @@ contract Strategy is BaseStrategy {
         uint256 lowestUtilization = UTIL_PRECISION;
 
         for (uint256 i = 0; i < pools.length; i++) {
-
             uint256 utilization = lendPairUtilization(pools[i], 0);
 
             // A pair is lowest if either
