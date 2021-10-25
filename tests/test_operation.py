@@ -39,7 +39,7 @@ def test_operation(currency, strategy, vault, whale, gov, bob, alice, allocChang
     strategy.changeAllocs(allocChangeConf, {"from": gov})
     strategy.rebalance(strategy.balanceOfStake() / 2)
     sleepAndHarvest(5, strategy, gov)
-    chain.sleep(6*60*60)
+    chain.sleep(6 * 60 * 60)
     chain.mine(1)
     # We should have made profit or stayed stagnant (This happens when there is no rewards in 1INCH rewards)
     assert vault.pricePerShare() / 1e18 >= 1

@@ -28,7 +28,7 @@ contract Strategy is BaseStrategy {
 
     struct PoolAlloc {
         address pool;
-        uint256 alloc;
+        uint256 pools;
     }
 
     uint256 private constant BASIS_PRECISION = 10000;
@@ -44,26 +44,24 @@ contract Strategy is BaseStrategy {
     address weth;
 
     //This records the current pools and allocs
-    PoolAlloc[] public alloc;
+    address[] public pools;
 
     event Cloned(address indexed clone);
 
-    constructor(address _vault, PoolAlloc[] memory _alloc) public BaseStrategy(_vault) {
-        _initializeStrat(_alloc);
+    constructor(address _vault, address[] memory _pools) public BaseStrategy(_vault) {
+        _initializeStrat(_pools);
     }
 
-    function _initializeStrat(PoolAlloc[] memory _alloc) internal {
+    function _initializeStrat(address[] memory _pools) internal {
         // You can set these parameters on deployment to whatever you want
         maxReportDelay = 6300;
         profitFactor = 1500;
         debtThreshold = 1_000_000 * 1e18;
 
-        require(_checkAllocTotal(_alloc), "!alloc");
-
         //Spookyswap router
         router = IUniswapV2Router02(0xF491e7B69E4244ad4002BC14e878a34207E38c29);
         weth = router.WETH();
-        _setAlloc(_alloc);
+        _setPools(_pools);
         addApprovals();
     }
 
@@ -72,15 +70,15 @@ contract Strategy is BaseStrategy {
         address _strategist,
         address _rewards,
         address _keeper,
-        PoolAlloc[] memory _alloc
+        address[] memory _pools
     ) external {
         //note: initialise can only be called once. in _initialize in BaseStrategy we have: require(address(want) == address(0), "Strategy already initialized");
         _initialize(_vault, _strategist, _rewards, _keeper);
-        _initializeStrat(_alloc);
+        _initializeStrat(_pools);
     }
 
-    function cloneStrategy(address _vault, PoolAlloc[] memory _alloc) external returns (address newStrategy) {
-        newStrategy = this.cloneStrategy(_vault, msg.sender, msg.sender, msg.sender, _alloc);
+    function cloneStrategy(address _vault, address[] memory _pools) external returns (address newStrategy) {
+        newStrategy = this.cloneStrategy(_vault, msg.sender, msg.sender, msg.sender, _pools);
     }
 
     function cloneStrategy(
@@ -88,7 +86,7 @@ contract Strategy is BaseStrategy {
         address _strategist,
         address _rewards,
         address _keeper,
-        PoolAlloc[] memory _alloc
+        address[] memory _pools
     ) external returns (address newStrategy) {
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
         bytes20 addressBytes = bytes20(address(this));
@@ -102,7 +100,7 @@ contract Strategy is BaseStrategy {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        Strategy(newStrategy).initialize(_vault, _strategist, _rewards, _keeper, _alloc);
+        Strategy(newStrategy).initialize(_vault, _strategist, _rewards, _keeper, _pools);
 
         emit Cloned(newStrategy);
     }
@@ -144,8 +142,8 @@ contract Strategy is BaseStrategy {
 
     //Returns staked value
     function balanceOfStake() public view returns (uint256 total) {
-        for (uint256 i = 0; i < alloc.length; i++) {
-            total = total.add(balanceInPool(alloc[i].pool));
+        for (uint256 i = 0; i < pools.length; i++) {
+            total = total.add(balanceInPool(pools[i]));
         }
     }
 
@@ -172,14 +170,14 @@ contract Strategy is BaseStrategy {
     }
 
     function getTotalPools() external view returns (uint256) {
-        return alloc.length;
+        return pools.length;
     }
 
     function getWithdrawableFromPools() public view returns (uint256[] memory availableAmounts) {
-        availableAmounts = new uint256[](alloc.length);
-        for (uint256 i = 0; i < alloc.length; i++) {
-            uint256 liqAvail = want.balanceOf(alloc[i].pool);
-            uint256 deposited = balanceInPool(alloc[i].pool);
+        availableAmounts = new uint256[](pools.length);
+        for (uint256 i = 0; i < pools.length; i++) {
+            uint256 liqAvail = want.balanceOf(pools[i]);
+            uint256 deposited = balanceInPool(pools[i]);
             availableAmounts[i] = Math.min(deposited, liqAvail);
         }
     }
@@ -194,9 +192,9 @@ contract Strategy is BaseStrategy {
     function _checkAllocTotal(PoolAlloc[] memory _alloc) internal pure returns (bool) {
         uint256 total = 0;
         for (uint256 i = 0; i < _alloc.length; i++) {
-            total += _alloc[i].alloc;
+            total += _alloc[i].pools;
         }
-        //Check total alloc is 100%
+        //Check total pools is 100%
         return total == BASIS_PRECISION;
     }
 
@@ -212,10 +210,9 @@ contract Strategy is BaseStrategy {
         uint256 highestInterest = 0;
         uint256 highestUtilization = 0;
 
-        for (uint256 i = 0; i < alloc.length; i++) {
-            PoolAlloc memory pool = alloc[i];
+        for (uint256 i = 0; i < pools.length; i++) {
 
-            uint256 utilization = lendPairUtilization(pool.pool, assetsToDeposit);
+            uint256 utilization = lendPairUtilization(pools[i], assetsToDeposit);
 
             // A pair is highest (really best) if either
             //   - It's utilization is higher, and either
@@ -230,7 +227,7 @@ contract Strategy is BaseStrategy {
                     highestUtilization > TAROT_MIN_TARGET_UTIL)
             ) {
                 highestUtilization = utilization;
-                _highestPair = pool.pool;
+                _highestPair = pools[i];
             }
         }
     }
@@ -238,10 +235,9 @@ contract Strategy is BaseStrategy {
     function lowestInterestPair(uint256 minLiquidShares) public view returns (address _lowestPair) {
         uint256 lowestUtilization = UTIL_PRECISION;
 
-        for (uint256 i = 0; i < alloc.length; i++) {
-            PoolAlloc memory pool = alloc[i];
+        for (uint256 i = 0; i < pools.length; i++) {
 
-            uint256 utilization = lendPairUtilization(pool.pool, 0);
+            uint256 utilization = lendPairUtilization(pools[i], 0);
 
             // A pair is lowest if either
             //   - It's utilization is lower, and either
@@ -254,10 +250,10 @@ contract Strategy is BaseStrategy {
                         utilization > TAROT_MIN_TARGET_UTIL &&
                         lowestUtilization < TAROT_MAX_TARGET_UTIL &&
                         lowestUtilization > TAROT_MIN_TARGET_UTIL)) &&
-                want.balanceOf(pool.pool) >= minLiquidShares &&
-                balanceInPool(pool.pool) > 0
+                want.balanceOf(pools[i]) >= minLiquidShares &&
+                balanceInPool(pools[i]) > 0
             ) {
-                _lowestPair = pool.pool;
+                _lowestPair = pools[i];
             }
         }
     }
@@ -271,8 +267,8 @@ contract Strategy is BaseStrategy {
 
     function updateExchangeRates() internal {
         //Update all the rates before harvest
-        for (uint256 i = 0; i < alloc.length; i++) {
-            ILendingPool(alloc[i].pool).exchangeRate();
+        for (uint256 i = 0; i < pools.length; i++) {
+            ILendingPool(pools[i]).exchangeRate();
         }
     }
 
@@ -335,17 +331,17 @@ contract Strategy is BaseStrategy {
         //First try to withdraw from lowest liq pair
         uint256 _remainingToWithdraw = _withdrawLowUtil(_amount);
 
-        for (uint256 i = 0; i < alloc.length && _remainingToWithdraw > 0; i++) {
-            uint256 balInPool = balanceInPool(alloc[i].pool);
-            uint256 liq = want.balanceOf(alloc[i].pool);
+        for (uint256 i = 0; i < pools.length && _remainingToWithdraw > 0; i++) {
+            uint256 balInPool = balanceInPool(pools[i]);
+            uint256 liq = want.balanceOf(pools[i]);
             //Withdraw from pool if there is enough liq
             if (liq >= _remainingToWithdraw && balInPool > 0) {
-                uint256 _amountReturned = _withdrawFromPool(alloc[i].pool, _remainingToWithdraw);
+                uint256 _amountReturned = _withdrawFromPool(pools[i], _remainingToWithdraw);
                 _remainingToWithdraw = _amountReturned < _remainingToWithdraw ? _remainingToWithdraw.sub(_amountReturned) : 0;
             }
             //Otherwise withdraw all from current pool
             else if (balInPool > 0) {
-                _remainingToWithdraw = _remainingToWithdraw.sub(_withdrawFrom(alloc[i].pool));
+                _remainingToWithdraw = _remainingToWithdraw.sub(_withdrawFrom(pools[i]));
             }
         }
     }
@@ -357,8 +353,8 @@ contract Strategy is BaseStrategy {
     }
 
     function _withdrawAll() internal {
-        for (uint256 i = 0; i < alloc.length; i++) {
-            _withdrawFrom(alloc[i].pool);
+        for (uint256 i = 0; i < pools.length; i++) {
+            _withdrawFrom(pools[i]);
         }
     }
 
@@ -369,14 +365,14 @@ contract Strategy is BaseStrategy {
     }
 
     function revokeApprovals() internal {
-        for (uint256 i = 0; i < alloc.length; i++) {
-            want.approve(alloc[i].pool, 0);
+        for (uint256 i = 0; i < pools.length; i++) {
+            want.approve(pools[i], 0);
         }
     }
 
     function addApprovals() internal {
-        for (uint256 i = 0; i < alloc.length; i++) {
-            if (want.allowance(address(this), alloc[i].pool) == 0) want.approve(alloc[i].pool, type(uint256).max);
+        for (uint256 i = 0; i < pools.length; i++) {
+            if (want.allowance(address(this), pools[i]) == 0) want.approve(pools[i], type(uint256).max);
         }
     }
 
@@ -388,22 +384,21 @@ contract Strategy is BaseStrategy {
         minCredit = _minCredit;
     }
 
-    function changeAllocs(PoolAlloc[] memory _newAlloc) external onlyGovernance {
+    function changeAllocs(address[] memory _newPools) external onlyGovernance {
         uint256 balStake = balanceOfStake();
         // Withdraw from all positions currently allocated
         if (balStake > 0 && balStake <= getMaxWithdrawable()) {
             _withdrawAll();
             revokeApprovals();
         }
-        require(_checkAllocTotal(_newAlloc), "!alloc");
 
-        _setAlloc(_newAlloc);
+        _setPools(_newPools);
         addApprovals();
         _deposit(balanceOfWant());
     }
 
-    function setAllocManual(PoolAlloc[] memory _newAlloc) external onlyGovernance {
-        _setAlloc(_newAlloc);
+    function setAllocManual(address[] memory _newPools) external onlyGovernance {
+        _setPools(_newPools);
     }
 
     function withdrawFromPool(address _pool, uint256 amount) external onlyAuthorized {
@@ -416,7 +411,7 @@ contract Strategy is BaseStrategy {
         address _newPool
     ) external onlyGovernance {
         _withdrawFromPool(_pool, amount);
-        // Make sure the _newPool is in alloc conf,otherwise withdraws will fail
+        // Make sure the _newPool is in pools conf,otherwise withdraws will fail
         _depositToPool(_newPool, amount);
     }
 
@@ -429,11 +424,11 @@ contract Strategy is BaseStrategy {
         _withdraw(amount);
     }
 
-    function _setAlloc(PoolAlloc[] memory _newAlloc) internal {
+    function _setPools(address[] memory _newPools) internal {
         //Delete old entries
-        delete alloc;
-        for (uint256 i = 0; i < _newAlloc.length; i++) {
-            alloc.push(PoolAlloc({pool: _newAlloc[i].pool, alloc: _newAlloc[i].alloc}));
+        delete pools;
+        for (uint256 i = 0; i < _newPools.length; i++) {
+            pools.push(_newPools[i]);
         }
     }
 
@@ -453,8 +448,7 @@ contract Strategy is BaseStrategy {
     function handleProfit() internal returns (uint256 _profit) {
         uint256 balanceOfWantBefore = balanceOfWant();
         updateExchangeRates();
-        _profit = balanceOfWant().sub(balanceOfWantBefore);
-        _profit += pendingInterest();
+        _profit = pendingInterest();
     }
 
     function prepareReturn(uint256 _debtOutstanding)
@@ -469,7 +463,7 @@ contract Strategy is BaseStrategy {
         (_debtPayment, _loss) = returnDebtOutstanding(_debtOutstanding);
         _profit = handleProfit();
         uint256 balanceAfter = balanceOfWant();
-        uint256 requiredWantBal = _profit + _debtPayment;
+        uint256 requiredWantBal = _profit.add(_debtPayment);
         if (balanceAfter < requiredWantBal) {
             //Withdraw enough to satisfy profit check
             _withdraw(requiredWantBal.sub(balanceAfter));
@@ -496,7 +490,7 @@ contract Strategy is BaseStrategy {
         uint256 balanceWant = balanceOfWant();
         uint256 balanceStaked = balanceOfStake();
         if (_amountNeeded > balanceWant) {
-            uint256 amountToWithdraw = (Math.min(balanceStaked, _amountNeeded - balanceWant));
+            uint256 amountToWithdraw = (Math.min(balanceStaked, _amountNeeded.sub(balanceWant)));
             _withdraw(amountToWithdraw);
         }
         // Since we might free more than needed, let's send back the min
