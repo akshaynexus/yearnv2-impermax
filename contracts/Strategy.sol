@@ -6,8 +6,7 @@ pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
 // These are the core Yearn libraries
-import {BaseStrategy} from "@yearnvaults/contracts/BaseStrategy.sol";
-import {SafeERC20, SafeMath, IERC20, Address} from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import {BaseStrategy, SafeERC20, SafeMath, IERC20, Address} from "@yearnvaults/contracts/BaseStrategy.sol";
 import "@openzeppelin/contracts/math/Math.sol";
 
 // Import interfaces for many popular DeFi projects, or add your own!
