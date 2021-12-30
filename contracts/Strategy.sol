@@ -35,6 +35,7 @@ contract Strategy is BaseStrategy {
     uint256 internal constant TAROT_MIN_TARGET_UTIL = 7e17; // 70%
     uint256 internal constant TAROT_MAX_TARGET_UTIL = 8e17; // 80%
     uint256 internal constant UTIL_PRECISION = 1e18;
+    bool internal isOriginal = true;
 
     uint256 public minProfit;
     uint256 public minCredit;
@@ -88,6 +89,7 @@ contract Strategy is BaseStrategy {
         address _keeper,
         address[] memory _pools
     ) external returns (address newStrategy) {
+        require(isOriginal,"!original");
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
         bytes20 addressBytes = bytes20(address(this));
 
