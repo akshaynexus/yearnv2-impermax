@@ -1,6 +1,6 @@
 def main():
-    #Paste data output from getAllFTMLendingpools script to calculate allocation
-    #TODO move this to getallftmlendingpools script
+    # Paste data output from getAllFTMLendingpools script to calculate allocation
+    # TODO move this to getallftmlendingpools script
     lendingData = [
         [
             "0x9cDED654472788a143C2285A6b2a580392510688",
