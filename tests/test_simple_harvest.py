@@ -36,7 +36,7 @@ def test_simple_harvest(
 
     # harvest, store new asset amount
     chain.sleep(1)
-    tx = strategy.harvest({"from": gov})
+    strategy.harvest({"from": gov})
     chain.sleep(1)
     new_assets = vault.totalAssets()
     # confirm we made money, or at least that we have about the same
@@ -56,5 +56,5 @@ def test_simple_harvest(
     chain.mine(1)
 
     # withdraw and confirm we made money, or at least that we have about the same
-    vault.withdraw({"from": whale})
+    tx = vault.withdraw({"from": whale})
     assert token.balanceOf(whale) >= startingWhale

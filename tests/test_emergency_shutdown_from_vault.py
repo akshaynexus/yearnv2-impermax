@@ -12,6 +12,7 @@ def test_emergency_shutdown_from_vault(
     strategy,
     chain,
     amount,
+    dust,
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
@@ -23,19 +24,20 @@ def test_emergency_shutdown_from_vault(
 
     # simulate one day of earnings
     chain.sleep(86400)
-
     chain.mine(1)
-    strategy.harvest({"from": gov})
-
-    # simulate one day of earnings
-    chain.sleep(86400)
 
     # set emergency and exit, then confirm that the strategy has no funds
     vault.setEmergencyShutdown(True, {"from": gov})
     chain.sleep(1)
-    strategy.harvest({"from": gov})
+    tx = strategy.harvest({"from": gov})
     chain.sleep(1)
-    assert math.isclose(strategy.estimatedTotalAssets(), 0, abs_tol=5)
+
+    # since we earn yield every block, and converting to another token, it's hard to get rid of all of it
+    assert strategy.estimatedTotalAssets() < dust
+    print(
+        "This is how much we have leftover:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # simulate a day of waiting for share price to bump back up
     chain.sleep(86400)
@@ -43,6 +45,4 @@ def test_emergency_shutdown_from_vault(
 
     # withdraw and confirm we made money
     vault.withdraw({"from": whale})
-    assert token.balanceOf(whale) >= startingWhale or math.isclose(
-        token.balanceOf(whale), startingWhale, abs_tol=5
-    )
+    assert token.balanceOf(whale) >= startingWhale

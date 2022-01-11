@@ -42,15 +42,22 @@ def token():
     yield Contract(token_address)
 
 
+# this is the amount of funds we are okay leaving in our strategy due to unrealized profit or conversion between bTokens
+@pytest.fixture(scope="module")
+def dust(token):
+    dust = 0.1 * 10 ** token.decimals()
+    yield dust
+
+
 # These are the pools we will lend to
 @pytest.fixture(scope="module")
 def pools():
-    pools = [ # "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9",  # FTM-TAROT LP
-              #"0x93a97db4fEA1d053C31f0B658b0B87f4b38e105d",  # FTM-SPIRIT LP
-              "0x6e11aaD63d11234024eFB6f7Be345d1d5b8a8f38",  # USDC-FTM Spirit
-              #"0x5B80b6e16147bc339e22296184F151262657A327",  # FTM-CRV LP Spooky
-              #"0xD05f23002f6d09Cf7b643B69F171cc2A3EAcd0b3"
-              ]  # FTM-BOO LP
+    pools = [  # "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9",  # FTM-TAROT LP
+        "0x93a97db4fEA1d053C31f0B658b0B87f4b38e105d",  # FTM-SPIRIT LP
+        "0x6e11aaD63d11234024eFB6f7Be345d1d5b8a8f38",  # USDC-FTM Spirit
+        # "0x5B80b6e16147bc339e22296184F151262657A327",  # FTM-CRV LP Spooky
+        # "0xD05f23002f6d09Cf7b643B69F171cc2A3EAcd0b3"
+    ]  # FTM-BOO LP
     yield pools
 
 
@@ -64,6 +71,7 @@ def zero_address():
 @pytest.fixture(scope="module")
 def farmed():
     yield Contract("0x34D33dc8Ac6f1650D94A7E9A972B47044217600b")
+
 
 # Define any accounts in this section
 # for live testing, governance is the strategist MS; we will update this before we endorse
@@ -164,8 +172,8 @@ def strategy(
     vault.setManagementFee(0, {"from": gov})
     # add our new strategy
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
-#     strategy.setHealthCheck(healthCheck, {"from": gov})
-#     strategy.setDoHealthCheck(True, {"from": gov})
+    #     strategy.setHealthCheck(healthCheck, {"from": gov})
+    #     strategy.setDoHealthCheck(True, {"from": gov})
     chain.sleep(1)
     strategy.harvest({"from": gov})
     chain.sleep(1)

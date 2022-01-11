@@ -262,7 +262,7 @@ def test_withdraw_after_donation_4(
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
     chain.sleep(1)
-    strategy.harvest({"from": gov})
+    tx = strategy.harvest({"from": gov})
     new_params = vault.strategies(strategy).dict()
 
     # sleep 10 hours to increase our credit available for last assert at the bottom.
@@ -331,7 +331,7 @@ def test_withdraw_after_donation_5(
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
     chain.sleep(1)
-    strategy.harvest({"from": gov})
+    tx = strategy.harvest({"from": gov})
     new_params = vault.strategies(strategy).dict()
 
     # sleep 10 hours to increase our credit available for last assert at the bottom.

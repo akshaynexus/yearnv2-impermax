@@ -11,3 +11,4 @@ node_modules/
 scripts/.DS_Store
 interfaces/.DS_Store
 tests/.DS_Store
+.DS_Store

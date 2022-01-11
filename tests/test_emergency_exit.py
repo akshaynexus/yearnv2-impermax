@@ -12,6 +12,7 @@ def test_emergency_exit(
     strategy,
     chain,
     amount,
+    dust,
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
@@ -33,7 +34,13 @@ def test_emergency_exit(
     chain.sleep(1)
     strategy.harvest({"from": gov})
     chain.sleep(1)
-    assert strategy.estimatedTotalAssets() == 0
+
+    # since we earn yield every block, and converting to another token, it's hard to get rid of all of it
+    assert strategy.estimatedTotalAssets() < dust
+    print(
+        "This is how much we have leftover:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # simulate a day of waiting for share price to bump back up
     chain.sleep(86400)

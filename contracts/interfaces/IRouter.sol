@@ -113,20 +113,11 @@ interface IRouter {
 
     function isVaultToken(address underlying) external view returns (bool);
 
-    function getUniswapV2Pair(address underlying)
-        external
-        view
-        returns (address);
+    function getUniswapV2Pair(address underlying) external view returns (address);
 
-    function getBorrowable(address uniswapV2Pair, uint8 index)
-        external
-        view
-        returns (address borrowable);
+    function getBorrowable(address uniswapV2Pair, uint8 index) external view returns (address borrowable);
 
-    function getCollateral(address uniswapV2Pair)
-        external
-        view
-        returns (address collateral);
+    function getCollateral(address uniswapV2Pair) external view returns (address collateral);
 
     function getLendingPool(address uniswapV2Pair)
         external
