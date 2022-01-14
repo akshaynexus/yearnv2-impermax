@@ -11,14 +11,14 @@ def isolation(fn_isolation):
 def whale(accounts):
     # Totally in it for the tech
     # Update this with a large holder of your want token (the largest EOA holder of LP)
-    whale = accounts.at("0x954773dD09a0bd708D3C03A62FB0947e8078fCf9", force=True)
+    whale = accounts.at("0x39B3bd37208CBaDE74D0fcBDBb12D606295b430a", force=True)
     yield whale
 
 
 # this is the amount of funds we have our whale deposit. adjust this as needed based on their wallet balance
 @pytest.fixture(scope="module")
 def amount():
-    amount = 50000e18
+    amount = 500_000e18
     yield amount
 
 
@@ -52,12 +52,12 @@ def dust(token):
 # These are the pools we will lend to
 @pytest.fixture(scope="module")
 def pools():
-    pools = [  # "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9",  # FTM-TAROT LP
-        "0x93a97db4fEA1d053C31f0B658b0B87f4b38e105d",  # FTM-SPIRIT LP
+    pools = [  # "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9",  # FTM-TAROT
+        "0x93a97db4fEA1d053C31f0B658b0B87f4b38e105d",  # FTM-SPIRIT Spirit
         "0x6e11aaD63d11234024eFB6f7Be345d1d5b8a8f38",  # USDC-FTM Spirit
-        # "0x5B80b6e16147bc339e22296184F151262657A327",  # FTM-CRV LP Spooky
-        # "0xD05f23002f6d09Cf7b643B69F171cc2A3EAcd0b3"
-    ]  # FTM-BOO LP
+        "0x5B80b6e16147bc339e22296184F151262657A327",  # FTM-CRV Spooky
+        "0xFf0BC3c7df0c247E5ce1eA220c7095cE1B6Dc745",  # FTM-USDC Spooky
+    ]
     yield pools
 
 
@@ -154,7 +154,7 @@ def strategy(
     gov,
     guardian,
     token,
-    # healthCheck,
+    healthCheck,
     chain,
     strategy_name,
     strategist_ms,
@@ -172,11 +172,15 @@ def strategy(
     vault.setManagementFee(0, {"from": gov})
     # add our new strategy
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
-    #     strategy.setHealthCheck(healthCheck, {"from": gov})
-    #     strategy.setDoHealthCheck(True, {"from": gov})
+    strategy.setHealthCheck(healthCheck, {"from": gov})
+    strategy.setDoHealthCheck(True, {"from": gov})
     chain.sleep(1)
     strategy.harvest({"from": gov})
     chain.sleep(1)
+
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    strategy.manuallySetAllocations(new_allocations, {"from": gov})
     yield strategy
 
 

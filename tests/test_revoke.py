@@ -31,7 +31,7 @@ def test_revoke_strategy_from_vault(
     vault.revokeStrategy(strategy.address, {"from": gov})
 
     chain.sleep(1)
-    strategy.harvest({"from": gov})
+    tx = strategy.harvest({"from": gov})
     chain.sleep(1)
     vaultAssets_after_revoke = vault.totalAssets()
 
