@@ -15,6 +15,7 @@ def test_custom_allocations(
     chain,
     amount,
 ):
+
     ## deposit to the vault after approving
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
@@ -56,6 +57,7 @@ def test_add_pair(
     chain,
     amount,
 ):
+
     ## deposit to the vault after approving
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
@@ -315,9 +317,10 @@ def test_remove_pair_locked(
     chain.sleep(1)
     chain.mine(1)
 
-    print("New exchange rate:", pool_2.exchangeRateLast() / 1e18)
+    print("\nNew exchange rate:", pool_2.exchangeRateLast() / 1e18)
+    print("True exchange rate:", strategy.trueExchangeRate(pool_2.address) / 1e18)
 
-    print("Vault share price:", vault.pricePerShare() / 1e18)
+    print("\nVault share price:", vault.pricePerShare() / 1e18)
     print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
 
 
@@ -487,6 +490,8 @@ def test_high_utilization(
 ):
 
     ## deposit to the vault after approving
+    startingWhale = token.balanceOf(whale)
+    print("Starting Whale:", startingWhale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
@@ -497,19 +502,13 @@ def test_high_utilization(
     new_allocations = [2500, 2500, 2500, 2500]
     tx = strategy.manuallySetAllocations(new_allocations, {"from": gov})
 
+    # check pool utilizations
+    old_utes = strategy.getEachPoolUtilization({"from": whale})
+    print("Pool utilizations at baseline:", old_utes)
+
     # check allocations
     allocations = strategy.getCurrentPoolAllocations({"from": whale})
-    print("These are our current allocations:", allocations)
-
-    # check pool order
-    first = strategy.getPools({"from": whale})
-    print("\nPools before any reorder:", first)
-
-    # update the pools
-    pool_1 = Contract(strategy.pools(0))
-    pool_2 = Contract(strategy.pools(2))
-    print("Pool 2 starting exchange rate:", pool_2.exchangeRateLast() / 1e18)
-    print("Pool 2 want balance:", token.balanceOf(pool_2) / 1e18)
+    print("These are our allocations before we do anything stupid:", allocations)
 
     # have two of the bTokens send away almost all of the free liquidity
     sentient_pool_1 = accounts.at(strategy.pools(0), force=True)
@@ -518,28 +517,139 @@ def test_high_utilization(
     token.transfer(gov, to_send, {"from": sentient_pool_1})
     after = token.balanceOf(sentient_pool_1)
     assert after < before
-    print("\nNew balance of pool 1:", after / 1e18)
+    print("New balance of pool 1:", after / 1e18)
 
     # send all of this one
     sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
-    to_send = token.balanceOf(sentient_pool_2) * 0.9999
+    to_send = token.balanceOf(sentient_pool_2)
     before = token.balanceOf(sentient_pool_2)
     token.transfer(gov, to_send, {"from": sentient_pool_2})
     after = token.balanceOf(sentient_pool_2)
     assert after < before
     print("New balance of pool 2:", after / 1e18)
-    chain.sleep(1)
-    chain.mine(1)
 
     # update the pools
+    pool_1 = Contract(strategy.pools(0))
+    pool_2 = Contract(strategy.pools(2))
     pool_1.sync({"from": whale})
     pool_2.sync({"from": whale})
     chain.sleep(1)
     chain.mine(1)
-    pool_1.exchangeRate({"from": whale})
-    new_rate = pool_2.exchangeRate({"from": whale})
-    chain.sleep(1)
-    chain.mine(1)
     print("We are draining these pools:", pool_1.address, pool_2.address)
-    print("\nNew pool 2 exchange rate:", new_rate.return_value / 1e18)
-    print("Pool 2 want balance:", token.balanceOf(pool_2) / 1e18)
+
+    # check our new balances
+    new_balance = pool_1.totalBalance() / 1e18
+    print(
+        "New Pool 1 balance",
+    )
+
+    # check pool utilizations, assert that 0 and 2 have gone up
+    utes = strategy.getEachPoolUtilization({"from": whale})
+    assert utes[2] > old_utes[2]
+    assert utes[0] > old_utes[0]
+    print("Pool utilizations after force increase:", utes)
+
+    # use our emergency withdraw to kill all of our bTokens
+    max_uint = 2 ** 256 - 1
+    tx = strategy.emergencyWithdraw(max_uint, {"from": gov})
+
+    # try out a full withdrawal, we should have to take a loss
+    loss_okay = 10000
+    max_uint = 2 ** 256 - 1
+
+    # strategy withdrawals won't accept losses unless vault or strategy is in emergency mode
+    with brownie.reverts():
+        vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
+
+    vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
+    tx = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
+    losses = token.balanceOf(whale) - startingWhale
+    print("These are our losses:", losses / (10 ** token.decimals()))
+
+
+# moved these two to a new test file since in the old one the last test was randomly failing for seemingly no good reasons, hypothesizing that the file was too long?
+# test out withdrawing directly from strategy via gov
+def test_emergency_withdraw(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+    accounts,
+):
+
+    ## deposit to the vault after approving
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    strategy.manuallySetAllocations(new_allocations, {"from": gov})
+
+    # check pool utilizations
+    old_utes = strategy.getEachPoolUtilization({"from": whale})
+    print("Pool utilizations at baseline:", old_utes)
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("These are our allocations before we do anything stupid:", allocations)
+
+    # use our emergency withdraw to kill all of our bTokens
+    max_uint = 2 ** 256 - 1
+    tx = strategy.emergencyWithdraw(max_uint, {"from": gov})
+
+    # check pool utilizations
+    new_utes = strategy.getEachPoolUtilization({"from": whale})
+    print("Pool utilizations after emergency withdraw:", new_utes)
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("These are our allocations after withdrawal:", allocations)
+
+
+# test if we get small losses from rapidly converting in and out of bTokens
+def test_deposit_harvest_withdraw(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+    accounts,
+):
+
+    ## deposit to the vault after approving
+    startingWhale = token.balanceOf(whale)
+    print("Starting Whale:", startingWhale)
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    harvest = strategy.harvest({"from": gov})
+    chain.sleep(1)
+
+    print(
+        "Strategy estimated total assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
+    tx = vault.withdraw({"from": whale})
+
+    # Seems that sometimes whale loses 1-2 gwei, sometimes doesn't lose anything
+    # these losses occur whenever we don't actually update our exchange rates -> no events fire for them, specifically AccrueInterest event
+    # additionally, in these cases, the strategy only thinks it has 99,999.999999... WFTM due to conversion,
+    # so when it gets this back, it's not a true loss in the strategy's withdrawal call's eyes
+    # this appears to only occur when we don't include any chain.sleep or chain.mine around the harvest call
+    net = token.balanceOf(whale) - startingWhale
+    if net >= 0:
+        print("\nThese are our gains, great than or equal to 0:", net, "wei")
+    if net < 0:
+        print("\nWe lost a few wei, this many:", net * -1, "wei")
+
+    assert net >= 0  # do this to force a revert so we can debug why we reverted

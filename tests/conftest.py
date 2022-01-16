@@ -17,8 +17,8 @@ def whale(accounts):
 
 # this is the amount of funds we have our whale deposit. adjust this as needed based on their wallet balance
 @pytest.fixture(scope="module")
-def amount():
-    amount = 500_000e18
+def amount(token):
+    amount = 100_000 * (10 ** token.decimals())
     yield amount
 
 
@@ -45,7 +45,7 @@ def token():
 # this is the amount of funds we are okay leaving in our strategy due to unrealized profit or conversion between bTokens
 @pytest.fixture(scope="module")
 def dust(token):
-    dust = 0.1 * 10 ** token.decimals()
+    dust = 0.1 * (10 ** token.decimals())
     yield dust
 
 
@@ -174,11 +174,8 @@ def strategy(
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
     strategy.setHealthCheck(healthCheck, {"from": gov})
     strategy.setDoHealthCheck(True, {"from": gov})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
 
-    # set our custom allocations
+    # set our custom allocations (use this and comment it out to test 1 vs 4 pools allocated to)
     new_allocations = [2500, 2500, 2500, 2500]
     strategy.manuallySetAllocations(new_allocations, {"from": gov})
     yield strategy

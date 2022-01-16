@@ -50,6 +50,9 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     string internal stratName; // set our strategy name here
 
+    // check for cloning
+    bool internal isOriginal = true;
+
     /* ========== CONSTRUCTOR ========== */
 
     constructor(
@@ -92,15 +95,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         _initializeStrat(_pools, _name);
     }
 
-    function cloneStrategy(
-        address _vault,
-        address[] memory _pools,
-        string memory _name
-    ) external returns (address newStrategy) {
-        newStrategy = this.cloneStrategy(_vault, msg.sender, msg.sender, msg.sender, _pools, _name);
-    }
-
-    function cloneStrategy(
+    function cloneTarotLender(
         address _vault,
         address _strategist,
         address _rewards,
@@ -108,6 +103,8 @@ contract StrategyImperamaxLender is BaseStrategy {
         address[] memory _pools,
         string memory _name
     ) external returns (address newStrategy) {
+        require(isOriginal);
+
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
         bytes20 addressBytes = bytes20(address(this));
 
@@ -137,16 +134,15 @@ contract StrategyImperamaxLender is BaseStrategy {
     }
 
     /// @notice Calculate the true exchange rate of a tarot pool since theirs is "up-only".
-    // ASK STORM, FP, WEASEL ET AL FOR FEEDBACK ABOUT USING THIS VS LIVE CALC. this one also puts me over bytecode limit currently
-    //     function trueExchangeRate(address _pool) public view returns (uint256) {
-    //         uint256 totalBorrows = IBorrowable(_pool).totalBorrows();
-    //         uint256 actualBalance = IBorrowable(_pool).totalBalance().add(totalBorrows);
-    //         uint256 totalSupply = IBorrowable(_pool).totalSupply();
-    //
-    //         return actualBalance.mul(BTOKEN_DECIMALS).div(totalSupply);
-    //     }
+    // ASK STORM, FP, WEASEL ET AL FOR FEEDBACK ABOUT USING THIS VS LIVE CALC.
+    function trueExchangeRate(address _pool) public view returns (uint256) {
+        uint256 totalBorrows = IBorrowable(_pool).totalBorrows();
+        uint256 actualBalance = IBorrowable(_pool).totalBalance().add(totalBorrows);
+        uint256 totalSupply = IBorrowable(_pool).totalSupply();
 
-    // need to figure this out better
+        return actualBalance.mul(BTOKEN_DECIMALS).div(totalSupply);
+    }
+
     /// @notice Returns value of want lent, held in the form of bTokens.
     function stakedBalance() public view returns (uint256 total) {
         total = 0;
@@ -165,7 +161,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         return balanceOfWant().add(stakedBalance());
     }
 
-    /// @notice This returns the utilization of each of our pools out of 10000.
+    /// @notice This returns the utilization (borrowed / total deposited) of each of our pools out of 10000.
     function getEachPoolUtilization() public view returns (uint256[] memory utilization) {
         utilization = new uint256[](pools.length);
         for (uint256 i = 0; i < pools.length; i++) {
@@ -179,12 +175,11 @@ contract StrategyImperamaxLender is BaseStrategy {
         }
     }
 
-    /// @notice This returns the allocation of our want balance to each pool, in BPS (1 = 0.01%)
+    /// @notice This returns the allocation of our want balance to each pool
     function getCurrentPoolAllocations() external view returns (uint256[] memory allocation) {
         allocation = new uint256[](pools.length);
         for (uint256 i = 0; i < pools.length; i++) {
-            uint256 rawValue = wantSuppliedToPool(pools[i]);
-            allocation[i] = rawValue.mul(BASIS_PRECISION).div(estimatedTotalAssets());
+            allocation[i] = wantSuppliedToPool(pools[i]);
         }
     }
 
@@ -242,14 +237,15 @@ contract StrategyImperamaxLender is BaseStrategy {
     /* ========== MUTATIVE FUNCTIONS ========== */
 
     // debugging events, delete once we go to prod
-    //     event toWithdraw(uint256 toWithdraw);
-    //     event Withdrawn(uint256 pulled);
-    //     event toLiquidate(uint256 sttuff);
-    //     event DebugString(string stuff);
+    // event toWithdraw(uint256 toWithdraw);
+    // event Withdrawn(uint256 pulled);
+    // event toLiquidate(uint256 sttuff);
+    // event DebugString(string stuff);
 
     // emit toLiquidate(_profit);
     // emit Withdrawn(_debtPayment);
     // emit toWithdraw(sttuff);
+    // emit DebugString(sttuff);
 
     function prepareReturn(uint256 _debtOutstanding)
         internal
@@ -273,6 +269,8 @@ contract StrategyImperamaxLender is BaseStrategy {
         if (_debtOutstanding > 0) {
             if (stakedBal > 0) {
                 // don't bother withdrawing if we don't have staked funds
+                uint256 debtNeeded = Math.min(stakedBal, _debtOutstanding);
+                // emit toWithdraw(debtNeeded);
                 _withdraw(Math.min(stakedBal, _debtOutstanding));
             }
             uint256 _withdrawnBal = balanceOfWant();
@@ -293,6 +291,7 @@ contract StrategyImperamaxLender is BaseStrategy {
             // check if we already have enough loose want from shutting down a pool
             if (_wantBal < _profit.add(_debtPayment)) {
                 uint256 amountToFree = _profit.add(_debtPayment).sub(_wantBal);
+                // emit toWithdraw(amountToFree);
                 _withdraw(amountToFree);
             }
         }
@@ -306,7 +305,7 @@ contract StrategyImperamaxLender is BaseStrategy {
     }
 
     function updateExchangeRates() internal {
-        //Update all the rates before harvest or withdrawals
+        // Update all the rates before harvest or withdrawals
         for (uint256 i = 0; i < pools.length; i++) {
             address targetPool = pools[i];
 
@@ -326,14 +325,14 @@ contract StrategyImperamaxLender is BaseStrategy {
     }
 
     function _deposit(uint256 _depositAmount) internal {
-        //Deposit to highest utilization pair, which should be last in our pools array
+        // Deposit to highest utilization pair, which should be last in our pools array
         for (uint256 i = pools.length; i > 0; i--) {
             i = i.sub(1);
             if (!preventDeposits[i]) {
                 // only deposit to this pool if it's not shutting down.
                 address targetPool = pools[i];
                 want.transfer(targetPool, _depositAmount);
-                require(IBorrowable(targetPool).mint(address(this)) >= 0, "No tokens minted");
+                require(IBorrowable(targetPool).mint(address(this)) >= 0, "Mint");
                 break;
             }
         }
@@ -346,6 +345,7 @@ contract StrategyImperamaxLender is BaseStrategy {
             uint256 _stakedBal = stakedBalance();
             if (_stakedBal > 0) {
                 uint256 amountToWithdraw = (Math.min(_stakedBal, _amountNeeded.sub(_wantBal)));
+                // emit toWithdraw(debtNeeded);
                 _withdraw(amountToWithdraw);
             }
             uint256 _withdrawnBal = balanceOfWant();
@@ -391,8 +391,16 @@ contract StrategyImperamaxLender is BaseStrategy {
 
             if (_amountToWithdraw == type(uint256).max) {
                 // this is for withdrawing the maximum we safely can
-                IBorrowable(currentPool).transfer(currentPool, ableToPullInbToken);
-                IBorrowable(currentPool).redeem(address(this));
+                if (PoolLiquidity > suppliedToPool) {
+                    // if possible, burn our whole bToken position to avoid dust
+                    uint256 balanceOfbToken = IBorrowable(currentPool).balanceOf(address(this));
+                    IBorrowable(currentPool).transfer(currentPool, balanceOfbToken);
+                    IBorrowable(currentPool).redeem(address(this));
+                } else {
+                    // otherwise, withdraw as much as we can
+                    IBorrowable(currentPool).transfer(currentPool, ableToPullInbToken);
+                    IBorrowable(currentPool).redeem(address(this));
+                }
                 continue;
             }
 
@@ -403,9 +411,11 @@ contract StrategyImperamaxLender is BaseStrategy {
             if (ableToPullInbToken > remainingbTokenNeeded) {
                 IBorrowable(currentPool).transfer(currentPool, remainingbTokenNeeded);
                 uint256 pulled = IBorrowable(currentPool).redeem(address(this));
+                // emit DebugString("Just redeemed all we need");
 
                 // add what we just withdrew to our total
                 withdrawn = withdrawn.add(pulled);
+                // emit Withdrawn(withdrawn);
                 break;
             }
             //Otherwise withdraw what we can from current pool
@@ -416,13 +426,24 @@ contract StrategyImperamaxLender is BaseStrategy {
                     uint256 balanceOfbToken = IBorrowable(currentPool).balanceOf(address(this));
                     IBorrowable(currentPool).transfer(currentPool, balanceOfbToken);
                     pulled = IBorrowable(currentPool).redeem(address(this));
+                    // emit DebugString("Just redeemed a full bToken balance");
+                    // emit Withdrawn(pulled);
                 } else {
                     IBorrowable(currentPool).transfer(currentPool, ableToPullInbToken);
                     pulled = IBorrowable(currentPool).redeem(address(this));
+                    // emit DebugString("Just redeemed a partial bToken balance");
                 }
                 // add what we just withdrew to our total, subtract it from what we still need
                 withdrawn = withdrawn.add(pulled);
-                remainingUnderlyingNeeded = remainingUnderlyingNeeded.sub(pulled);
+                // emit Withdrawn(withdrawn);
+
+                // don't want to overflow
+                if (remainingUnderlyingNeeded > pulled) {
+                    remainingUnderlyingNeeded = remainingUnderlyingNeeded.sub(pulled);
+                } else {
+                    remainingUnderlyingNeeded = 0;
+                }
+                // emit toLiquidate(remainingUnderlyingNeeded);
             }
         }
         if (_amountToWithdraw > withdrawn) {
@@ -485,7 +506,7 @@ contract StrategyImperamaxLender is BaseStrategy {
                 uint256 currentWantBalance = balanceOfWant();
                 uint256 toDeposit = Math.min(currentWantBalance, toAllocate);
                 want.transfer(targetPool, toDeposit);
-                require(IBorrowable(targetPool).mint(address(this)) >= 0, "No lend tokens minted");
+                require(IBorrowable(targetPool).mint(address(this)) >= 0, "Mint");
             }
         }
     }
@@ -506,6 +527,7 @@ contract StrategyImperamaxLender is BaseStrategy {
     // TAROT DEFINITELY MAKES DECIMALS LINE UP!!!!!!!! So the smallest unit for a USDC one is at the 6 decimals, so 6e-18 bToken = 6e-6 USDC. uses floor though!!!!!
 
     /// @notice This is used for shutting down lending to a particular pool gracefully. May need to be called more than once for a given pool.
+    // comment this out when using lots of events to test so we don't go over bytecode limit
     function attemptToRemovePool(address _poolToRemove) external onlyEmergencyAuthorized {
         // amount strategy has supplied to this pool
         uint256 suppliedToPool = wantSuppliedToPool(_poolToRemove);
@@ -531,9 +553,9 @@ contract StrategyImperamaxLender is BaseStrategy {
                 IBorrowable(_poolToRemove).transfer(_poolToRemove, balanceOfbToken);
                 IBorrowable(_poolToRemove).redeem(address(this));
             }
-            require(IBorrowable(_poolToRemove).balanceOf(address(this)) == 0, "Tokens left");
+            require(IBorrowable(_poolToRemove).balanceOf(address(this)) == 0, "Remainder");
 
-            require(helperPool.length == extraHelperPool.length, "Fix helpers");
+            require(helperPool.length == extraHelperPool.length, "Helpers");
 
             // we can now remove this pool from our array
             for (uint256 i = 0; i < helperPool.length; i++) {
@@ -542,7 +564,7 @@ contract StrategyImperamaxLender is BaseStrategy {
                 } else if (!helperPool[i]) {
                     // these are normal pools that allow deposits
                     preventDeposits.push(false);
-                } else if (helperPool[i] && extraHelperPool[i] != _poolToRemove) {
+                } else {
                     // this allows us to be emptying multiple pools at once. if the pool is emptying but not the one we're removing, leave it alone.
                     preventDeposits.push(true);
                 }
@@ -568,14 +590,14 @@ contract StrategyImperamaxLender is BaseStrategy {
                 } else if (!helperPool[i]) {
                     // these are normal pools that allow deposits
                     preventDeposits.push(false);
-                } else if (helperPool[i] && extraHelperPool[i] != _poolToRemove) {
+                } else {
                     // this allows us to be emptying multiple pools at once. if the pool is emptying but not the one we're removing, leave it alone.
                     preventDeposits.push(true);
                 }
                 pools.push(extraHelperPool[i]); // if we're not removing a pool, make sure to add it back to our pools
             }
         }
-        require(pools.length == preventDeposits.length, "Fix pools");
+        require(pools.length == preventDeposits.length, "Pools");
     }
 
     function manuallySetOrder(address[] memory _poolOrder) external onlyEmergencyAuthorized {
@@ -620,7 +642,5 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     function ethToWant(uint256 _amtInWei) public view virtual override returns (uint256) {}
 
-    // Override this to add all tokens/tokenized positions this contract manages
-    // on a *persistent* basis (e.g. not just for swapping back to want ephemerally)
     function protectedTokens() internal view override returns (address[] memory) {}
 }

@@ -29,6 +29,9 @@ def test_emergency_shutdown_from_vault(
     # set emergency and exit, then confirm that the strategy has no funds
     vault.setEmergencyShutdown(True, {"from": gov})
     chain.sleep(1)
+    chain.mine(1)
+
+    # in emergency shutdown, debtOutstanding is set to the full debt balance of the strategy, so this harvest will be removing all funds
     tx = strategy.harvest({"from": gov})
     chain.sleep(1)
 
