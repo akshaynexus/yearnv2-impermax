@@ -93,6 +93,104 @@ def test_add_pair(
     strategy.harvest({"from": gov})
 
 
+# do this to test how far we can push the strategy
+def test_add_max_pairs(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+    extra,
+):
+
+    # only do this test for WFTM :)
+    if token.address == "0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83":
+        ## deposit to the vault after approving
+        startingWhale = token.balanceOf(whale)
+        token.approve(vault, 2 ** 256 - 1, {"from": whale})
+        vault.deposit(amount, {"from": whale})
+        chain.sleep(1)
+        strategy.harvest({"from": gov})
+        chain.sleep(1)
+
+        # add a pool
+        to_add = [
+            "0x3dA659961cFB2B3E7b167b6d0761d6Ecb5926422",
+            "0x7B501aA0Ffb85171c94366db113119cdfAF7b5F5",
+            "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9",
+            "0x8C97Dcb6a6b08E8bEECE3D75e918FbC076C094ab",
+            "0x1CeE4Fd447D7Ce967FddAE4b7DA872A3a1d04F4B",
+            "0x845b1619eB0C7C0F9bc7d5494a0b332f6D8Fd4f6",
+            "0x7A7dd36BCca42952CC1E67BcA1Be44097fF5b644",
+            "0xD05f23002f6d09Cf7b643B69F171cc2A3EAcd0b3",
+            "0xbeB8c1266B6a561F2f10B2d242628D7Ed4bA458e",
+            "0x604ea00f00C25747d369D9D114590a483e23ff48",
+            "0x4e4a8AE836cBE9576113706e166ae1194A7113E6",
+            "0xB566727F4edF30bA13939E304d828e30d4063C59",
+            "0xDf79EA5d777F28cAb9fD42ACda6208a228c71B59",
+            "0xf63D4894c605C246fBe238514355E3cD9680CFF0",
+            "0x7D0Eb2b3EDeC482c86e0d588a0f1b3A36b99D336",
+            "0xeaAb0Eb61326499a4BC79eCDbC6F3BB17B323dd6",
+        ]
+        for x in to_add:
+            strategy.addTarotPool(x, {"from": gov})
+
+        # set our custom allocations
+        new_allocations = [
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+            500,
+        ]
+        tx_1 = strategy.manuallySetAllocations(new_allocations, {"from": gov})
+
+        # check allocations
+        allocations = strategy.getCurrentPoolAllocations({"from": whale})
+        print("These are our current allocations:", allocations)
+
+        # sleep for a day and harvest
+        chain.sleep(86400)
+        chain.mine(1)
+        tx_2 = strategy.harvest({"from": gov})
+        chain.sleep(86400)
+        chain.mine(1)
+
+        tx_3 = vault.withdraw({"from": whale})
+        assert token.balanceOf(whale) > startingWhale
+        profits = (token.balanceOf(whale) - startingWhale) / 1e18
+        print("Profits for our whale in 24 hours:", profits)
+        print(
+            "Gas used:",
+            "Manual Allocation:",
+            tx_1.gas_used,
+            "Harvest:",
+            tx_2.gas_used,
+            "Withdrawal from all:",
+            tx_3.gas_used,
+        )
+    else:
+        print("We only run this test with WFTM")
+
+
 # StrategyImperamaxLender.attemptToRemovePool - 46.6%
 # remove a pair whenever it doesn't have any locked debt
 def test_remove_pair_free(
@@ -1238,6 +1336,9 @@ def test_exchange_rates(
     for pool_index in range(4):
         pool_address = strategy.pools(pool_index)
         pool_contract = Contract(pool_address)
+        pool_contract.skim(whale, {"from": whale})
+        chain.sleep(1)
+        chain.mine(1)
 
         tarot_rate = pool_contract.exchangeRateLast({"from": whale})
         internal_rate = strategy.trueExchangeRate(pool_address)
@@ -1246,7 +1347,10 @@ def test_exchange_rates(
         print("Tarot exchange rate:", tarot_rate / 1e18)
         print("True exchange rate:", internal_rate / 1e18)
 
-        assert tarot_rate == internal_rate
+        if tarot_rate == internal_rate:
+            print("\nThe rates are exactly the same 🚀")
+        else:  # for USDC, it seems to lose a bit of precision
+            assert math.isclose(tarot_rate, internal_rate, abs_tol=1e6)
 
     # sleep for a day and harvest, high util pools will automatically move to the back
     chain.sleep(86400)
@@ -1257,6 +1361,9 @@ def test_exchange_rates(
     for pool_index in range(4):
         pool_address = strategy.pools(pool_index)
         pool_contract = Contract(pool_address)
+        pool_contract.skim(whale, {"from": whale})
+        chain.sleep(1)
+        chain.mine(1)
 
         tarot_rate = pool_contract.exchangeRateLast({"from": whale})
         internal_rate = strategy.trueExchangeRate(pool_address)
@@ -1265,7 +1372,10 @@ def test_exchange_rates(
         print("Tarot exchange rate:", tarot_rate / 1e18)
         print("True exchange rate:", internal_rate / 1e18)
 
-        assert tarot_rate == internal_rate
+        if tarot_rate == internal_rate:
+            print("\nThe rates are exactly the same 🚀")
+        else:  # for USDC, it seems to lose a bit of precision
+            assert math.isclose(tarot_rate, internal_rate, abs_tol=1e6)
 
     # have one of the bTokens send away almost all of the free liquidity
     sentient_pool_1 = accounts.at(strategy.pools(0), force=True)
@@ -1299,6 +1409,9 @@ def test_exchange_rates(
     for pool_index in range(4):
         pool_address = strategy.pools(pool_index)
         pool_contract = Contract(pool_address)
+        pool_contract.skim(whale, {"from": whale})
+        chain.sleep(1)
+        chain.mine(1)
 
         tarot_rate = pool_contract.exchangeRateLast({"from": whale})
         internal_rate = strategy.trueExchangeRate(pool_address)
@@ -1312,4 +1425,7 @@ def test_exchange_rates(
             # for the rekt pool, the tarot rate will be the same as if it didn't lose assets, so will be greater than ours
             assert tarot_rate > internal_rate
         else:
-            assert tarot_rate == internal_rate
+            if tarot_rate == internal_rate:
+                print("\nThe rates are exactly the same 🚀")
+            else:  # for USDC, it seems to lose a bit of precision
+                assert math.isclose(tarot_rate, internal_rate, abs_tol=1e6)
