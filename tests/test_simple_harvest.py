@@ -28,7 +28,7 @@ def test_simple_harvest(
     assert old_assets > 0
     assert token.balanceOf(strategy) == 0
     assert strategy.estimatedTotalAssets() > 0
-    print("\nStarting Assets: ", old_assets / 1e18)
+    print("\nStarting Assets: ", old_assets / (10 ** token.decimals()))
 
     # simulate 24 hours of earnings
     chain.sleep(86400)
@@ -41,7 +41,7 @@ def test_simple_harvest(
     new_assets = vault.totalAssets()
     # confirm we made money, or at least that we have about the same
     assert new_assets >= old_assets
-    print("\nAssets after 1 day: ", new_assets / 1e18)
+    print("\nAssets after 1 day: ", new_assets / (10 ** token.decimals()))
 
     # Display estimated APR
     print(

@@ -169,7 +169,7 @@ def test_remove_pair_locked(
     token.transfer(gov, to_send, {"from": sentient_pool_1})
     after = token.balanceOf(sentient_pool_1)
     assert after < before
-    print("New balance of pool 1:", after / 1e18)
+    print("New balance of pool 1:", after / (10 ** token.decimals()))
 
     # send all of this one
     sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
@@ -178,7 +178,7 @@ def test_remove_pair_locked(
     token.transfer(gov, to_send, {"from": sentient_pool_2})
     after = token.balanceOf(sentient_pool_2)
     assert after < before
-    print("New balance of pool 2:", after / 1e18)
+    print("New balance of pool 2:", after / (10 ** token.decimals()))
 
     # update the pools
     pool_1 = Contract(strategy.pools(0))
@@ -190,7 +190,7 @@ def test_remove_pair_locked(
     print("We are draining these pools:", pool_1.address, pool_2.address)
 
     # check our new balances
-    new_balance = pool_1.totalBalance() / 1e18
+    new_balance = pool_1.totalBalance() / (10 ** token.decimals())
     print(
         "New Pool 1 balance",
     )
@@ -220,8 +220,11 @@ def test_remove_pair_locked(
 
     # check our free want
     new_want = token.balanceOf(strategy)
-    print("\nWant after 1 removal:", new_want / 1e18)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print("\nWant after 1 removal:", new_want / (10 ** token.decimals()))
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # sleep for a day and harvest, turn off health checks since low liq = high yield
     chain.sleep(86400)
@@ -261,8 +264,11 @@ def test_remove_pair_locked(
 
     # check our free want
     newer_want = token.balanceOf(strategy)
-    print("\nWant after 2 removals:", newer_want / 1e18)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print("\nWant after 2 removals:", newer_want / (10 ** token.decimals()))
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # sleep for a day and harvest, high util pools will automatically move to the back
     chain.sleep(86400)
@@ -302,8 +308,11 @@ def test_remove_pair_locked(
 
     # check our free want
     newest_want = token.balanceOf(strategy)
-    print("\nWant after 3 removals:", newest_want / 1e18)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print("\nWant after 3 removals:", newest_want / (10 ** token.decimals()))
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # sleep for a day and harvest
     chain.sleep(86400)
@@ -326,11 +335,17 @@ def test_remove_pair_locked(
     chain.sleep(1)
     chain.mine(1)
 
-    print("\nNew exchange rate:", pool_2.exchangeRateLast() / 1e18)
-    print("True exchange rate:", strategy.trueExchangeRate(pool_2.address) / 1e18)
+    print("\nNew exchange rate:", pool_2.exchangeRateLast() / (10 ** token.decimals()))
+    print(
+        "True exchange rate:",
+        strategy.trueExchangeRate(pool_2.address) / (10 ** token.decimals()),
+    )
 
-    print("\nVault share price:", vault.pricePerShare() / 1e18)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print("\nVault share price:", vault.pricePerShare() / (10 ** token.decimals()))
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
 
 # StrategyImperamaxLender.manuallySetOrder - 100.0%
@@ -417,7 +432,10 @@ def test_reorder_pairs(
     # check allocations
     allocations = strategy.getCurrentPoolAllocations({"from": whale})
     print("These are our current allocations:", allocations)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # check that we don't have any free want
     starting_want = token.balanceOf(strategy)
@@ -429,8 +447,11 @@ def test_reorder_pairs(
 
     # check our free want
     new_want = token.balanceOf(strategy)
-    print("\nWant after 1 removal:", new_want / 1e18)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print("\nWant after 1 removal:", new_want / (10 ** token.decimals()))
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # check allocations
     allocations = strategy.getCurrentPoolAllocations({"from": whale})
@@ -442,8 +463,11 @@ def test_reorder_pairs(
 
     # check our free want
     newer_want = token.balanceOf(strategy)
-    print("\nWant after 2 removals:", newer_want / 1e18)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print("\nWant after 2 removals:", newer_want / (10 ** token.decimals()))
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # check allocations
     allocations = strategy.getCurrentPoolAllocations({"from": whale})
@@ -455,8 +479,11 @@ def test_reorder_pairs(
 
     # check our free want
     newer_want = token.balanceOf(strategy)
-    print("\nWant after 3 removals:", newer_want / 1e18)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print("\nWant after 3 removals:", newer_want / (10 ** token.decimals()))
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # check allocations
     allocations = strategy.getCurrentPoolAllocations({"from": whale})
@@ -475,8 +502,11 @@ def test_reorder_pairs(
 
     # check our free want
     new_want = token.balanceOf(strategy)
-    print("\nWant after 2 removals and harvest:", new_want / 1e18)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print("\nWant after 2 removals and harvest:", new_want / (10 ** token.decimals()))
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # check allocations
     allocations = strategy.getCurrentPoolAllocations({"from": whale})
@@ -524,7 +554,7 @@ def test_high_utilization(
     token.transfer(gov, to_send, {"from": sentient_pool_1})
     after = token.balanceOf(sentient_pool_1)
     assert after < before
-    print("New balance of pool 1:", after / 1e18)
+    print("New balance of pool 1:", after / (10 ** token.decimals()))
 
     # send all of this one
     sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
@@ -533,7 +563,7 @@ def test_high_utilization(
     token.transfer(gov, to_send, {"from": sentient_pool_2})
     after = token.balanceOf(sentient_pool_2)
     assert after < before
-    print("New balance of pool 2:", after / 1e18)
+    print("New balance of pool 2:", after / (10 ** token.decimals()))
 
     # update the pools
     pool_1 = Contract(strategy.pools(0))
@@ -545,7 +575,7 @@ def test_high_utilization(
     print("We are draining these pools:", pool_1.address, pool_2.address)
 
     # check our new balances
-    new_balance = pool_1.totalBalance() / 1e18
+    new_balance = pool_1.totalBalance() / (10 ** token.decimals())
     print(
         "New Pool 1 balance",
     )
@@ -698,7 +728,7 @@ def test_high_utilization_emergency_shutdown_from_vault_harvest(
     token.transfer(gov, to_send, {"from": sentient_pool_1})
     after = token.balanceOf(sentient_pool_1)
     assert after < before
-    print("New balance of pool 1:", after / 1e18)
+    print("New balance of pool 1:", after / (10 ** token.decimals()))
 
     # send all of this one
     sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
@@ -707,7 +737,7 @@ def test_high_utilization_emergency_shutdown_from_vault_harvest(
     token.transfer(gov, to_send, {"from": sentient_pool_2})
     after = token.balanceOf(sentient_pool_2)
     assert after < before
-    print("New balance of pool 2:", after / 1e18)
+    print("New balance of pool 2:", after / (10 ** token.decimals()))
 
     # update the pools
     pool_1 = Contract(strategy.pools(0))
@@ -719,7 +749,7 @@ def test_high_utilization_emergency_shutdown_from_vault_harvest(
     print("We are draining these pools:", pool_1.address, pool_2.address)
 
     # check our new balances
-    new_balance = pool_1.totalBalance() / 1e18
+    new_balance = pool_1.totalBalance() / (10 ** token.decimals())
     print(
         "New Pool 1 balance",
     )
@@ -743,7 +773,7 @@ def test_high_utilization_emergency_shutdown_from_vault_harvest(
 
     # check our vault share price, it should have gone down to like 0.5
     share_price = vault.pricePerShare()
-    print("Share price:", share_price / 1e18)
+    print("Share price:", share_price / (10 ** token.decimals()))
 
     max_uint = 2 ** 256 - 1
     loss_okay = 10000
@@ -797,7 +827,7 @@ def test_high_utilization_emergency_shutdown_from_vault_no_harvest(
     token.transfer(gov, to_send, {"from": sentient_pool_1})
     after = token.balanceOf(sentient_pool_1)
     assert after < before
-    print("New balance of pool 1:", after / 1e18)
+    print("New balance of pool 1:", after / (10 ** token.decimals()))
 
     # send all of this one
     sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
@@ -806,7 +836,7 @@ def test_high_utilization_emergency_shutdown_from_vault_no_harvest(
     token.transfer(gov, to_send, {"from": sentient_pool_2})
     after = token.balanceOf(sentient_pool_2)
     assert after < before
-    print("New balance of pool 2:", after / 1e18)
+    print("New balance of pool 2:", after / (10 ** token.decimals()))
 
     # update the pools
     pool_1 = Contract(strategy.pools(0))
@@ -818,7 +848,7 @@ def test_high_utilization_emergency_shutdown_from_vault_no_harvest(
     print("We are draining these pools:", pool_1.address, pool_2.address)
 
     # check our new balances
-    new_balance = pool_1.totalBalance() / 1e18
+    new_balance = pool_1.totalBalance() / (10 ** token.decimals())
     print(
         "New Pool 1 balance",
     )
@@ -886,7 +916,7 @@ def test_high_utilization_emergency_exit_harvest(
     token.transfer(gov, to_send, {"from": sentient_pool_1})
     after = token.balanceOf(sentient_pool_1)
     assert after < before
-    print("New balance of pool 1:", after / 1e18)
+    print("New balance of pool 1:", after / (10 ** token.decimals()))
 
     # send all of this one
     sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
@@ -895,7 +925,7 @@ def test_high_utilization_emergency_exit_harvest(
     token.transfer(gov, to_send, {"from": sentient_pool_2})
     after = token.balanceOf(sentient_pool_2)
     assert after < before
-    print("New balance of pool 2:", after / 1e18)
+    print("New balance of pool 2:", after / (10 ** token.decimals()))
 
     # update the pools
     pool_1 = Contract(strategy.pools(0))
@@ -907,7 +937,7 @@ def test_high_utilization_emergency_exit_harvest(
     print("We are draining these pools:", pool_1.address, pool_2.address)
 
     # check our new balances
-    new_balance = pool_1.totalBalance() / 1e18
+    new_balance = pool_1.totalBalance() / (10 ** token.decimals())
     print(
         "New Pool 1 balance",
     )
@@ -931,7 +961,7 @@ def test_high_utilization_emergency_exit_harvest(
 
     # check our vault share price, it should have gone down to like 0.5
     share_price = vault.pricePerShare()
-    print("Share price:", share_price / 1e18)
+    print("Share price:", share_price / (10 ** token.decimals()))
 
     max_uint = 2 ** 256 - 1
     loss_okay = 10000
@@ -985,7 +1015,7 @@ def test_high_utilization_emergency_exit_no_harvest(
     token.transfer(gov, to_send, {"from": sentient_pool_1})
     after = token.balanceOf(sentient_pool_1)
     assert after < before
-    print("New balance of pool 1:", after / 1e18)
+    print("New balance of pool 1:", after / (10 ** token.decimals()))
 
     # send all of this one
     sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
@@ -994,7 +1024,7 @@ def test_high_utilization_emergency_exit_no_harvest(
     token.transfer(gov, to_send, {"from": sentient_pool_2})
     after = token.balanceOf(sentient_pool_2)
     assert after < before
-    print("New balance of pool 2:", after / 1e18)
+    print("New balance of pool 2:", after / (10 ** token.decimals()))
 
     # update the pools
     pool_1 = Contract(strategy.pools(0))
@@ -1006,7 +1036,7 @@ def test_high_utilization_emergency_exit_no_harvest(
     print("We are draining these pools:", pool_1.address, pool_2.address)
 
     # check our new balances
-    new_balance = pool_1.totalBalance() / 1e18
+    new_balance = pool_1.totalBalance() / (10 ** token.decimals())
     print(
         "New Pool 1 balance",
     )
@@ -1073,7 +1103,7 @@ def test_remove_pair_locked_and_unlock(
     token.transfer(gov, to_send, {"from": sentient_pool_1})
     after = token.balanceOf(sentient_pool_1)
     assert after < before
-    print("\nNew balance of pool 1:", after / 1e18)
+    print("\nNew balance of pool 1:", after / (10 ** token.decimals()))
 
     # update the pools
     pool_1 = Contract(strategy.pools(0))
@@ -1106,8 +1136,11 @@ def test_remove_pair_locked_and_unlock(
 
     # check our free want
     new_want = token.balanceOf(strategy)
-    print("\nWant after 1 removal:", new_want / 1e18)
-    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+    print("\nWant after 1 removal:", new_want / (10 ** token.decimals()))
+    print(
+        "Total estimated assets:",
+        strategy.estimatedTotalAssets() / (10 ** token.decimals()),
+    )
 
     # sleep for a day and harvest, high util pools will automatically move to the back
     chain.sleep(86400)
@@ -1130,7 +1163,10 @@ def test_remove_pair_locked_and_unlock(
     token.transfer(sentient_pool_1, to_send, {"from": gov})
     after = token.balanceOf(sentient_pool_1)
     assert after > before
-    print("\nNew balance of pool 1 after returning lost funds:", after / 1e18)
+    print(
+        "\nNew balance of pool 1 after returning lost funds:",
+        after / (10 ** token.decimals()),
+    )
 
     # update the pool, it should now be in the 4th spot
     pool_4 = Contract(strategy.pools(3))
@@ -1238,7 +1274,7 @@ def test_exchange_rates(
     token.transfer(gov, to_send, {"from": sentient_pool_1})
     after = token.balanceOf(sentient_pool_1)
     assert after < before
-    print("\nNew balance of pool 1:", after / 1e18)
+    print("\nNew balance of pool 1:", after / (10 ** token.decimals()))
 
     # update the pools
     pool_1 = Contract(strategy.pools(0))

@@ -22,7 +22,7 @@ def test_base_strategy(
 
     # test our harvestTrigger for when we have a profit (don't normally need this)
     # our whale donates dust to the vault, what a nice person!
-    donation = 1e16
+    donation = amount / 100
     token.transfer(strategy, donation, {"from": whale})
     chain.sleep(86400 * 4)  # fast forward so our min delay is passed
     chain.mine(1)

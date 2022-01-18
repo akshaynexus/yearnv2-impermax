@@ -72,7 +72,7 @@ def test_cloning(
     assert old_assets_dai > 0
     assert token.balanceOf(newStrategy) == 0
     assert newStrategy.estimatedTotalAssets() > 0
-    print("\nStarting Assets: ", old_assets_dai / 1e18)
+    print("\nStarting Assets: ", old_assets_dai / (10 ** token.decimals()))
 
     # simulate 1 day of earnings
     chain.sleep(86400)
@@ -83,7 +83,7 @@ def test_cloning(
     new_assets_dai = vault.totalAssets()
     # we can't use strategyEstimated Assets because the profits are sent to the vault
     assert new_assets_dai >= old_assets_dai
-    print("\nAssets after 2 days: ", new_assets_dai / 1e18)
+    print("\nAssets after 2 days: ", new_assets_dai / (10 ** token.decimals()))
 
     # Display estimated APR based on the two days before the pay out
     print(
