@@ -15,7 +15,6 @@ import "@openzeppelin/contracts/math/Math.sol";
 import {BaseStrategy, StrategyParams} from "@yearnvaults/contracts/BaseStrategy.sol";
 
 import "./interfaces/IBorrowable.sol";
-import "./interfaces/IRouter.sol";
 
 interface vaultAPIExtended {
     function emergencyShutdown() external view returns (bool);
@@ -39,8 +38,6 @@ contract StrategyImperamaxLender is BaseStrategy {
     uint256 internal constant BTOKEN_DECIMALS = 1e18;
 
     bool public reorder = true;
-
-    IRouter constant router = IRouter(0x283e62CFe14b352dB8e30A9575481DCbf589Ad98);
 
     //This records the current pools and allocations
     address[] public pools;
@@ -74,7 +71,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         // set up our pools
         for (uint256 i = 0; i < _pools.length; i++) {
             pools.push(_pools[i]);
-            want.approve(_pools[i], type(uint256).max);
+            want.safeApprove(_pools[i], type(uint256).max);
             preventDeposits.push(false);
         }
 
@@ -151,7 +148,8 @@ contract StrategyImperamaxLender is BaseStrategy {
             address currentPool = pools[i];
 
             uint256 bTokenBalance = IBorrowable(currentPool).balanceOf(address(this));
-            uint256 currentExchangeRate = IBorrowable(currentPool).exchangeRateLast();
+            uint256 currentExchangeRate = trueExchangeRate(currentPool);
+            // uint256 currentExchangeRate = IBorrowable(currentPool).exchangeRateLast(); <- this is the "correct" code using tarot's values
             total = total.add(bTokenBalance.mul(currentExchangeRate).div(BTOKEN_DECIMALS));
         }
     }
@@ -234,18 +232,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         }
     }
 
-    /* ========== MUTATIVE FUNCTIONS ========== */
-
-    // debugging events, delete once we go to prod
-    // event toWithdraw(uint256 toWithdraw);
-    // event Withdrawn(uint256 pulled);
-    // event toLiquidate(uint256 sttuff);
-    // event DebugString(string stuff);
-
-    // emit toLiquidate(_profit);
-    // emit Withdrawn(_debtPayment);
-    // emit toWithdraw(sttuff);
-    // emit DebugString(sttuff);
+    /* ========== CORE MUTATIVE FUNCTIONS ========== */
 
     function prepareReturn(uint256 _debtOutstanding)
         internal
@@ -270,7 +257,6 @@ contract StrategyImperamaxLender is BaseStrategy {
             if (stakedBal > 0) {
                 // don't bother withdrawing if we don't have staked funds
                 uint256 debtNeeded = Math.min(stakedBal, _debtOutstanding);
-                // emit toWithdraw(debtNeeded);
                 _withdraw(Math.min(stakedBal, _debtOutstanding));
             }
             uint256 _withdrawnBal = balanceOfWant();
@@ -291,7 +277,6 @@ contract StrategyImperamaxLender is BaseStrategy {
             // check if we already have enough loose want from shutting down a pool
             if (_wantBal < _profit.add(_debtPayment)) {
                 uint256 amountToFree = _profit.add(_debtPayment).sub(_wantBal);
-                // emit toWithdraw(amountToFree);
                 _withdraw(amountToFree);
             }
         }
@@ -332,7 +317,7 @@ contract StrategyImperamaxLender is BaseStrategy {
                 // only deposit to this pool if it's not shutting down.
                 address targetPool = pools[i];
                 want.transfer(targetPool, _depositAmount);
-                require(IBorrowable(targetPool).mint(address(this)) >= 0, "Mint");
+                require(IBorrowable(targetPool).mint(address(this)) >= 0);
                 break;
             }
         }
@@ -345,7 +330,6 @@ contract StrategyImperamaxLender is BaseStrategy {
             uint256 _stakedBal = stakedBalance();
             if (_stakedBal > 0) {
                 uint256 amountToWithdraw = (Math.min(_stakedBal, _amountNeeded.sub(_wantBal)));
-                // emit toWithdraw(debtNeeded);
                 _withdraw(amountToWithdraw);
             }
             uint256 _withdrawnBal = balanceOfWant();
@@ -365,6 +349,9 @@ contract StrategyImperamaxLender is BaseStrategy {
         uint256 remainingUnderlyingNeeded = _amountToWithdraw;
         uint256 withdrawn;
 
+        // use this to check if our debtRatio is 0
+        StrategyParams memory params = vault.strategies(address(this));
+
         for (uint256 i = 0; i < pools.length; i++) {
             // save some gas by storing locally
             address currentPool = pools[i];
@@ -383,13 +370,11 @@ contract StrategyImperamaxLender is BaseStrategy {
                 continue;
             }
 
-            // get our exchange rate for this pool of bToken to want
-            uint256 currentExchangeRate = IBorrowable(currentPool).exchangeRateLast();
+            // figure out how much bToken we are able to burn from this pool for want.
+            uint256 ableToPullInbToken = ableToPullInUnderlying.mul(BTOKEN_DECIMALS).div(IBorrowable(currentPool).exchangeRateLast());
 
-            // figure out how much bToken we are able to burn from this pool for want
-            uint256 ableToPullInbToken = ableToPullInUnderlying.mul(BTOKEN_DECIMALS).div(currentExchangeRate);
-
-            if (_amountToWithdraw == type(uint256).max) {
+            // check if we need to pull as much as possible from our pools
+            if (params.debtRatio == 0 || _amountToWithdraw == type(uint256).max || vaultAPIExtended(address(vault)).emergencyShutdown()) {
                 // this is for withdrawing the maximum we safely can
                 if (PoolLiquidity > suppliedToPool) {
                     // if possible, burn our whole bToken position to avoid dust
@@ -405,17 +390,16 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
 
             // this is how much we need, converted to the bTokens of this specific pool. add 5 wei as a buffer for calculation losses.
-            uint256 remainingbTokenNeeded = remainingUnderlyingNeeded.mul(BTOKEN_DECIMALS).div(currentExchangeRate).add(5);
+            uint256 remainingbTokenNeeded =
+                remainingUnderlyingNeeded.mul(BTOKEN_DECIMALS).div(IBorrowable(currentPool).exchangeRateLast()).add(5);
 
             // Withdraw all we need from the current pool if we can
             if (ableToPullInbToken > remainingbTokenNeeded) {
                 IBorrowable(currentPool).transfer(currentPool, remainingbTokenNeeded);
                 uint256 pulled = IBorrowable(currentPool).redeem(address(this));
-                // emit DebugString("Just redeemed all we need");
 
                 // add what we just withdrew to our total
                 withdrawn = withdrawn.add(pulled);
-                // emit Withdrawn(withdrawn);
                 break;
             }
             //Otherwise withdraw what we can from current pool
@@ -426,16 +410,12 @@ contract StrategyImperamaxLender is BaseStrategy {
                     uint256 balanceOfbToken = IBorrowable(currentPool).balanceOf(address(this));
                     IBorrowable(currentPool).transfer(currentPool, balanceOfbToken);
                     pulled = IBorrowable(currentPool).redeem(address(this));
-                    // emit DebugString("Just redeemed a full bToken balance");
-                    // emit Withdrawn(pulled);
                 } else {
                     IBorrowable(currentPool).transfer(currentPool, ableToPullInbToken);
                     pulled = IBorrowable(currentPool).redeem(address(this));
-                    // emit DebugString("Just redeemed a partial bToken balance");
                 }
                 // add what we just withdrew to our total, subtract it from what we still need
                 withdrawn = withdrawn.add(pulled);
-                // emit Withdrawn(withdrawn);
 
                 // don't want to overflow
                 if (remainingUnderlyingNeeded > pulled) {
@@ -443,18 +423,16 @@ contract StrategyImperamaxLender is BaseStrategy {
                 } else {
                     remainingUnderlyingNeeded = 0;
                 }
-                // emit toLiquidate(remainingUnderlyingNeeded);
             }
         }
-        if (_amountToWithdraw > withdrawn) {
-            // normally, we want to revert to prevent unnecessary losses.
-            StrategyParams memory params = vault.strategies(address(this));
-
-            require(
-                params.debtRatio == 0 || vaultAPIExtended(address(vault)).emergencyShutdown() || _amountToWithdraw == type(uint256).max,
-                "Low liquidity"
-            );
-        }
+        //         if (_amountToWithdraw > withdrawn) {
+        //             // normally, we want to revert to prevent unnecessary losses.
+        //             // talk to reviewers about whether we want this or not
+        //             require(
+        //                 params.debtRatio == 0 || vaultAPIExtended(address(vault)).emergencyShutdown() || _amountToWithdraw == type(uint256).max,
+        //                 "Low liquidity"
+        //             );
+        //         }
     }
 
     function emergencyWithdraw(uint256 _amountToWithdraw) external onlyEmergencyAuthorized {
@@ -463,7 +441,7 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     // this will withdraw the maximum we can based on free liquidity and take a loss for any locked funds
     function liquidateAllPositions() internal virtual override returns (uint256 _liquidatedAmount) {
-        _withdraw(estimatedTotalAssets());
+        _withdraw(type(uint256).max);
         _liquidatedAmount = balanceOfWant();
     }
 
@@ -477,6 +455,8 @@ contract StrategyImperamaxLender is BaseStrategy {
             bToken.transfer(_newStrategy, balanceOfbToken);
         }
     }
+
+    /* ========== PERIPHERAL MUTATIVE FUNCTIONS ========== */
 
     /// @notice Manually set allocations for our attached pools in bps (1 = 0.01%)
     function manuallySetAllocations(uint256[] calldata _ratios) external onlyAuthorized {
@@ -506,28 +486,25 @@ contract StrategyImperamaxLender is BaseStrategy {
                 uint256 currentWantBalance = balanceOfWant();
                 uint256 toDeposit = Math.min(currentWantBalance, toAllocate);
                 want.transfer(targetPool, toDeposit);
-                require(IBorrowable(targetPool).mint(address(this)) >= 0, "Mint");
+                require(IBorrowable(targetPool).mint(address(this)) >= 0);
             }
         }
     }
 
-    function addTarotPool(address _newPair) external onlyGovernance {
-        // kashPair asset must match want. Try and adapt this one?
-        // require(IKashiPair(_newKashiPair).asset() == BIERC20(address(want)));
+    ///@notice Add another Tarot pool to our strategy for lending. This can only be called by governance.
+    function addTarotPool(address _newPool) external onlyGovernance {
+        // asset must match want. Try and adapt this one?
+        require(IBorrowable(_newPool).underlying() == address(want));
 
         for (uint256 i = 0; i < pools.length; i++) {
             // pool must not already be attached
-            require(_newPair != pools[i]);
+            require(_newPool != pools[i]);
         }
-        pools.push(_newPair);
+        pools.push(_newPool);
         preventDeposits.push(false);
     }
 
-    // add an event when a pool is removed successfully?
-    // TAROT DEFINITELY MAKES DECIMALS LINE UP!!!!!!!! So the smallest unit for a USDC one is at the 6 decimals, so 6e-18 bToken = 6e-6 USDC. uses floor though!!!!!
-
     /// @notice This is used for shutting down lending to a particular pool gracefully. May need to be called more than once for a given pool.
-    // comment this out when using lots of events to test so we don't go over bytecode limit
     function attemptToRemovePool(address _poolToRemove) external onlyEmergencyAuthorized {
         // amount strategy has supplied to this pool
         uint256 suppliedToPool = wantSuppliedToPool(_poolToRemove);
@@ -539,10 +516,10 @@ contract StrategyImperamaxLender is BaseStrategy {
         uint256 currentExchangeRate = IBorrowable(_poolToRemove).exchangeRateLast();
 
         // use helpers pool to keep track of multiple pools that are being shutdown or removed.
-        bool[] memory helperPool = preventDeposits;
+        bool[] memory boolHelperPool = preventDeposits;
         delete preventDeposits;
 
-        address[] memory extraHelperPool = pools;
+        address[] memory addressHelperPool = pools;
         delete pools;
 
         // Check if there is enough liquidity to withdraw our whole position immediately
@@ -553,26 +530,24 @@ contract StrategyImperamaxLender is BaseStrategy {
                 IBorrowable(_poolToRemove).transfer(_poolToRemove, balanceOfbToken);
                 IBorrowable(_poolToRemove).redeem(address(this));
             }
-            require(IBorrowable(_poolToRemove).balanceOf(address(this)) == 0, "Remainder");
-
-            require(helperPool.length == extraHelperPool.length, "Helpers");
+            require(IBorrowable(_poolToRemove).balanceOf(address(this)) == 0);
 
             // we can now remove this pool from our array
-            for (uint256 i = 0; i < helperPool.length; i++) {
-                if (extraHelperPool[i] == _poolToRemove) {
-                    continue; // we don't want to re-add the pool we removed
-                } else if (!helperPool[i]) {
+            for (uint256 i = 0; i < boolHelperPool.length; i++) {
+                if (addressHelperPool[i] == _poolToRemove) {
+                    // we don't want to re-add the pool we just successfully emptied
+                    continue;
+                } else if (!boolHelperPool[i]) {
                     // these are normal pools that allow deposits
                     preventDeposits.push(false);
                 } else {
-                    // this allows us to be emptying multiple pools at once. if the pool is emptying but not the one we're removing, leave it alone.
+                    // if the pool is emptying but not the one we're removing, leave it as true.
                     preventDeposits.push(true);
                 }
-                pools.push(extraHelperPool[i]); // if we're not removing a pool, make sure to add it back to our pools
+                pools.push(addressHelperPool[i]); // if we didn't remove a pool, make sure to add it back to our pools
             }
         } else {
-            // Otherwise withdraw what we can from current pool
-            // the most want we can withdraw from this pool
+            // Otherwise withdraw the most want we can withdraw from this pool
             uint256 ableToPullInUnderlying = Math.min(suppliedToPool, PoolLiquidity);
 
             // convert that to bToken and redeem (withdraw)
@@ -583,21 +558,21 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
 
             // we can now remove this pool from our array
-            for (uint256 i = 0; i < helperPool.length; i++) {
-                if (extraHelperPool[i] == _poolToRemove) {
-                    // this is our pool we are targeting
+            for (uint256 i = 0; i < boolHelperPool.length; i++) {
+                if (addressHelperPool[i] == _poolToRemove) {
+                    // this is our pool we are targeting, but it's not empty yet
                     preventDeposits.push(true);
-                } else if (!helperPool[i]) {
+                } else if (!boolHelperPool[i]) {
                     // these are normal pools that allow deposits
                     preventDeposits.push(false);
                 } else {
                     // this allows us to be emptying multiple pools at once. if the pool is emptying but not the one we're removing, leave it alone.
                     preventDeposits.push(true);
                 }
-                pools.push(extraHelperPool[i]); // if we're not removing a pool, make sure to add it back to our pools
+                pools.push(addressHelperPool[i]); // if we didn't remove a pool, make sure to add it back to our pools
             }
         }
-        require(pools.length == preventDeposits.length, "Pools");
+        require(pools.length == preventDeposits.length); // use this to ensure we didn't mess up the length of our arrays
     }
 
     function manuallySetOrder(address[] memory _poolOrder) external onlyEmergencyAuthorized {
@@ -611,12 +586,12 @@ contract StrategyImperamaxLender is BaseStrategy {
         }
     }
 
-    // This allows us to manually harvest with our keeper as needed
+    ///@notice This allows us to manually harvest with our keeper as needed
     function setForceHarvestTriggerOnce(bool _forceHarvestTriggerOnce) external onlyAuthorized {
         forceHarvestTriggerOnce = _forceHarvestTriggerOnce;
     }
 
-    // This allows us to turn off automatic reordering during harvests
+    ///@notice This allows us to turn off automatic reordering during harvests
     function setReorder(bool _reorder) external onlyAuthorized {
         reorder = _reorder;
     }

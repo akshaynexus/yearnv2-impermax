@@ -56,6 +56,7 @@ def test_add_pair(
     strategy,
     chain,
     amount,
+    extra,
 ):
 
     ## deposit to the vault after approving
@@ -66,10 +67,15 @@ def test_add_pair(
     chain.sleep(1)
 
     # add a pool
-    to_add = "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9"  # FTM-TAROT LP
+    to_add = extra
     strategy.addTarotPool(to_add, {"from": gov})
 
     # can't add a pool that already exists
+    with brownie.reverts():
+        strategy.addTarotPool(to_add, {"from": gov})
+
+    # can't add a pool with the wrong underlying
+    to_add = "0xE0d10cEfc6CDFBBde41A12C8BBe9548587568329"  # FTM-TAROT LP (TAROT side)
     with brownie.reverts():
         strategy.addTarotPool(to_add, {"from": gov})
 
@@ -111,8 +117,11 @@ def test_remove_pair_free(
     new_allocations = [2000, 2000, 3000, 3000]
     tx = strategy.manuallySetAllocations(new_allocations, {"from": gov})
 
+    # record our positions
+    pos_0 = strategy.pools(0)
+
     # remove a pair!
-    to_remove = "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9"
+    to_remove = pos_0
     strategy.attemptToRemovePool(to_remove, {"from": gov})
 
     # sleep for a day and harvest
@@ -349,6 +358,12 @@ def test_reorder_pairs(
     new_allocations = [2500, 2500, 2500, 2500]
     tx = strategy.manuallySetAllocations(new_allocations, {"from": gov})
 
+    # record our positions
+    pos_0 = strategy.pools(0)
+    pos_1 = strategy.pools(1)
+    pos_2 = strategy.pools(2)
+    pos_3 = strategy.pools(3)
+
     # check allocations
     allocations = strategy.getCurrentPoolAllocations({"from": whale})
     print("These are our current allocations:", allocations)
@@ -378,12 +393,7 @@ def test_reorder_pairs(
     strategy.harvest({"from": gov})
 
     # next, reorder by manual preference
-    new_order = [
-        "0x6e11aaD63d11234024eFB6f7Be345d1d5b8a8f38",
-        "0x5B80b6e16147bc339e22296184F151262657A327",
-        "0x93a97db4fEA1d053C31f0B658b0B87f4b38e105d",
-        "0xFf0BC3c7df0c247E5ce1eA220c7095cE1B6Dc745",
-    ]
+    new_order = [pos_3, pos_2, pos_1, pos_0]
     strategy.manuallySetOrder(new_order, {"from": gov})
 
     # check allocations
@@ -391,10 +401,7 @@ def test_reorder_pairs(
     print("These are our current allocations:", allocations)
 
     # can't reorder with a different length
-    new_order_shorter = [
-        "0x5B80b6e16147bc339e22296184F151262657A327",
-        "0x93a97db4fEA1d053C31f0B658b0B87f4b38e105d",
-    ]
+    new_order_shorter = [pos_0, pos_3]
     with brownie.reverts():
         strategy.manuallySetOrder(new_order_shorter, {"from": gov})
 
@@ -549,19 +556,10 @@ def test_high_utilization(
     assert utes[0] > old_utes[0]
     print("Pool utilizations after force increase:", utes)
 
-    # use our emergency withdraw to kill all of our bTokens
-    max_uint = 2 ** 256 - 1
-    tx = strategy.emergencyWithdraw(max_uint, {"from": gov})
-
     # try out a full withdrawal, we should have to take a loss
     loss_okay = 10000
     max_uint = 2 ** 256 - 1
 
-    # strategy withdrawals won't accept losses unless vault or strategy is in emergency mode
-    with brownie.reverts():
-        vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
-
-    vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
     tx = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
     losses = token.balanceOf(whale) - startingWhale
     print("These are our losses:", losses / (10 ** token.decimals()))
@@ -653,3 +651,629 @@ def test_deposit_harvest_withdraw(
         print("\nWe lost a few wei, this many:", net * -1, "wei")
 
     assert net >= 0  # do this to force a revert so we can debug why we reverted
+
+
+# do emergency shutdown from vault with a harvest, but with some of the assets locked in a pool
+def test_high_utilization_emergency_shutdown_from_vault_harvest(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+    accounts,
+):
+
+    ## deposit to the vault after approving
+    startingWhale = token.balanceOf(whale)
+    print("Starting Whale:", startingWhale)
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    strategy.manuallySetAllocations(new_allocations, {"from": gov})
+
+    # simulate one day of earnings
+    chain.sleep(86400)
+    chain.mine(1)
+
+    # check pool utilizations
+    old_utes = strategy.getEachPoolUtilization({"from": whale})
+    print("Pool utilizations at baseline:", old_utes)
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("These are our allocations before we do anything stupid:", allocations)
+
+    # have two of the bTokens send away almost all of the free liquidity
+    sentient_pool_1 = accounts.at(strategy.pools(0), force=True)
+    to_send = token.balanceOf(sentient_pool_1) * 0.9999
+    before = token.balanceOf(sentient_pool_1)
+    token.transfer(gov, to_send, {"from": sentient_pool_1})
+    after = token.balanceOf(sentient_pool_1)
+    assert after < before
+    print("New balance of pool 1:", after / 1e18)
+
+    # send all of this one
+    sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
+    to_send = token.balanceOf(sentient_pool_2)
+    before = token.balanceOf(sentient_pool_2)
+    token.transfer(gov, to_send, {"from": sentient_pool_2})
+    after = token.balanceOf(sentient_pool_2)
+    assert after < before
+    print("New balance of pool 2:", after / 1e18)
+
+    # update the pools
+    pool_1 = Contract(strategy.pools(0))
+    pool_2 = Contract(strategy.pools(2))
+    pool_1.sync({"from": whale})
+    pool_2.sync({"from": whale})
+    chain.sleep(1)
+    chain.mine(1)
+    print("We are draining these pools:", pool_1.address, pool_2.address)
+
+    # check our new balances
+    new_balance = pool_1.totalBalance() / 1e18
+    print(
+        "New Pool 1 balance",
+    )
+
+    # check pool utilizations, assert that 0 and 2 have gone up
+    utes = strategy.getEachPoolUtilization({"from": whale})
+    assert utes[2] > old_utes[2]
+    assert utes[0] > old_utes[0]
+    print("Pool utilizations after force increase:", utes)
+
+    # set emergency and exit, then confirm that the strategy has no funds
+    vault.setEmergencyShutdown(True, {"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    # in emergency shutdown, debtOutstanding is set to the full debt balance of the strategy, so this harvest will be removing all funds
+    strategy.setDoHealthCheck(False, {"from": gov})
+    tx = strategy.harvest({"from": gov})
+    print("These is our harvest:", tx.events["Harvested"])
+    chain.sleep(1)
+
+    # check our vault share price, it should have gone down to like 0.5
+    share_price = vault.pricePerShare()
+    print("Share price:", share_price / 1e18)
+
+    max_uint = 2 ** 256 - 1
+    loss_okay = 10000
+    tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
+    losses = token.balanceOf(whale) - startingWhale
+    print("These are our losses:", losses / (10 ** token.decimals()))
+
+
+# do emergency shutdown from vault without a harvest, but with some of the assets locked in a pool
+def test_high_utilization_emergency_shutdown_from_vault_no_harvest(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+    accounts,
+):
+
+    ## deposit to the vault after approving
+    startingWhale = token.balanceOf(whale)
+    print("Starting Whale:", startingWhale)
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    strategy.manuallySetAllocations(new_allocations, {"from": gov})
+
+    # simulate one day of earnings
+    chain.sleep(86400)
+    chain.mine(1)
+
+    # check pool utilizations
+    old_utes = strategy.getEachPoolUtilization({"from": whale})
+    print("Pool utilizations at baseline:", old_utes)
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("These are our allocations before we do anything stupid:", allocations)
+
+    # have two of the bTokens send away almost all of the free liquidity
+    sentient_pool_1 = accounts.at(strategy.pools(0), force=True)
+    to_send = token.balanceOf(sentient_pool_1) * 0.9999
+    before = token.balanceOf(sentient_pool_1)
+    token.transfer(gov, to_send, {"from": sentient_pool_1})
+    after = token.balanceOf(sentient_pool_1)
+    assert after < before
+    print("New balance of pool 1:", after / 1e18)
+
+    # send all of this one
+    sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
+    to_send = token.balanceOf(sentient_pool_2)
+    before = token.balanceOf(sentient_pool_2)
+    token.transfer(gov, to_send, {"from": sentient_pool_2})
+    after = token.balanceOf(sentient_pool_2)
+    assert after < before
+    print("New balance of pool 2:", after / 1e18)
+
+    # update the pools
+    pool_1 = Contract(strategy.pools(0))
+    pool_2 = Contract(strategy.pools(2))
+    pool_1.sync({"from": whale})
+    pool_2.sync({"from": whale})
+    chain.sleep(1)
+    chain.mine(1)
+    print("We are draining these pools:", pool_1.address, pool_2.address)
+
+    # check our new balances
+    new_balance = pool_1.totalBalance() / 1e18
+    print(
+        "New Pool 1 balance",
+    )
+
+    # check pool utilizations, assert that 0 and 2 have gone up
+    utes = strategy.getEachPoolUtilization({"from": whale})
+    assert utes[2] > old_utes[2]
+    assert utes[0] > old_utes[0]
+    print("Pool utilizations after force increase:", utes)
+
+    # set emergency and exit, then confirm that the strategy has no funds
+    vault.setEmergencyShutdown(True, {"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    max_uint = 2 ** 256 - 1
+    loss_okay = 10000
+    tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
+    losses = token.balanceOf(whale) - startingWhale
+    print("These are our whale's losses:", losses / (10 ** token.decimals()))
+
+
+# do emergency exit from strategy with a harvest, but with some of the assets locked in a pool
+def test_high_utilization_emergency_exit_harvest(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+    accounts,
+):
+
+    ## deposit to the vault after approving
+    startingWhale = token.balanceOf(whale)
+    print("Starting Whale:", startingWhale)
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    strategy.manuallySetAllocations(new_allocations, {"from": gov})
+
+    # simulate one day of earnings
+    chain.sleep(86400)
+    chain.mine(1)
+
+    # check pool utilizations
+    old_utes = strategy.getEachPoolUtilization({"from": whale})
+    print("Pool utilizations at baseline:", old_utes)
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("These are our allocations before we do anything stupid:", allocations)
+
+    # have two of the bTokens send away almost all of the free liquidity
+    sentient_pool_1 = accounts.at(strategy.pools(0), force=True)
+    to_send = token.balanceOf(sentient_pool_1) * 0.9999
+    before = token.balanceOf(sentient_pool_1)
+    token.transfer(gov, to_send, {"from": sentient_pool_1})
+    after = token.balanceOf(sentient_pool_1)
+    assert after < before
+    print("New balance of pool 1:", after / 1e18)
+
+    # send all of this one
+    sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
+    to_send = token.balanceOf(sentient_pool_2)
+    before = token.balanceOf(sentient_pool_2)
+    token.transfer(gov, to_send, {"from": sentient_pool_2})
+    after = token.balanceOf(sentient_pool_2)
+    assert after < before
+    print("New balance of pool 2:", after / 1e18)
+
+    # update the pools
+    pool_1 = Contract(strategy.pools(0))
+    pool_2 = Contract(strategy.pools(2))
+    pool_1.sync({"from": whale})
+    pool_2.sync({"from": whale})
+    chain.sleep(1)
+    chain.mine(1)
+    print("We are draining these pools:", pool_1.address, pool_2.address)
+
+    # check our new balances
+    new_balance = pool_1.totalBalance() / 1e18
+    print(
+        "New Pool 1 balance",
+    )
+
+    # check pool utilizations, assert that 0 and 2 have gone up
+    utes = strategy.getEachPoolUtilization({"from": whale})
+    assert utes[2] > old_utes[2]
+    assert utes[0] > old_utes[0]
+    print("Pool utilizations after force increase:", utes)
+
+    # set emergency and exit, then confirm that the strategy has no funds
+    strategy.setEmergencyExit({"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    # in emergency shutdown, debtOutstanding is set to the full debt balance of the strategy, so this harvest will be removing all funds
+    strategy.setDoHealthCheck(False, {"from": gov})
+    tx = strategy.harvest({"from": gov})
+    print("These is our harvest:", tx.events["Harvested"])
+    chain.sleep(1)
+
+    # check our vault share price, it should have gone down to like 0.5
+    share_price = vault.pricePerShare()
+    print("Share price:", share_price / 1e18)
+
+    max_uint = 2 ** 256 - 1
+    loss_okay = 10000
+    tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
+    losses = token.balanceOf(whale) - startingWhale
+    print("These are our losses:", losses / (10 ** token.decimals()))
+
+
+# do emergency exit from strategy without a harvest, but with some of the assets locked in a pool
+def test_high_utilization_emergency_exit_no_harvest(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+    accounts,
+):
+
+    ## deposit to the vault after approving
+    startingWhale = token.balanceOf(whale)
+    print("Starting Whale:", startingWhale)
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    strategy.manuallySetAllocations(new_allocations, {"from": gov})
+
+    # simulate one day of earnings
+    chain.sleep(86400)
+    chain.mine(1)
+
+    # check pool utilizations
+    old_utes = strategy.getEachPoolUtilization({"from": whale})
+    print("Pool utilizations at baseline:", old_utes)
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("These are our allocations before we do anything stupid:", allocations)
+
+    # have two of the bTokens send away almost all of the free liquidity
+    sentient_pool_1 = accounts.at(strategy.pools(0), force=True)
+    to_send = token.balanceOf(sentient_pool_1) * 0.9999
+    before = token.balanceOf(sentient_pool_1)
+    token.transfer(gov, to_send, {"from": sentient_pool_1})
+    after = token.balanceOf(sentient_pool_1)
+    assert after < before
+    print("New balance of pool 1:", after / 1e18)
+
+    # send all of this one
+    sentient_pool_2 = accounts.at(strategy.pools(2), force=True)
+    to_send = token.balanceOf(sentient_pool_2)
+    before = token.balanceOf(sentient_pool_2)
+    token.transfer(gov, to_send, {"from": sentient_pool_2})
+    after = token.balanceOf(sentient_pool_2)
+    assert after < before
+    print("New balance of pool 2:", after / 1e18)
+
+    # update the pools
+    pool_1 = Contract(strategy.pools(0))
+    pool_2 = Contract(strategy.pools(2))
+    pool_1.sync({"from": whale})
+    pool_2.sync({"from": whale})
+    chain.sleep(1)
+    chain.mine(1)
+    print("We are draining these pools:", pool_1.address, pool_2.address)
+
+    # check our new balances
+    new_balance = pool_1.totalBalance() / 1e18
+    print(
+        "New Pool 1 balance",
+    )
+
+    # check pool utilizations, assert that 0 and 2 have gone up
+    utes = strategy.getEachPoolUtilization({"from": whale})
+    assert utes[2] > old_utes[2]
+    assert utes[0] > old_utes[0]
+    print("Pool utilizations after force increase:", utes)
+
+    # set emergency and exit, then confirm that the strategy has no funds
+    strategy.setEmergencyExit({"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    max_uint = 2 ** 256 - 1
+    loss_okay = 10000
+    tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
+    losses = token.balanceOf(whale) - startingWhale
+    print("These are our whale's losses:", losses / (10 ** token.decimals()))
+
+
+# deposit to pools, manually send out free liquidity from these pools to lock our funds up to simulate high utilization, then send it back
+def test_remove_pair_locked_and_unlock(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+    accounts,
+):
+
+    ## deposit to the vault after approving
+    startingWhale = token.balanceOf(whale)
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    tx = strategy.manuallySetAllocations(new_allocations, {"from": gov})
+
+    # check pool utilizations
+    old_utes = strategy.getEachPoolUtilization({"from": whale})
+    print("Pool utilizations at baseline:", old_utes)
+
+    # check pool order
+    order = strategy.getPools({"from": whale})
+    print("Pool order:", order)
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("These are our allocations before we do anything stupid:", allocations)
+
+    # have two of the bTokens send away almost all of the free liquidity
+    sentient_pool_1 = accounts.at(strategy.pools(0), force=True)
+    to_send = token.balanceOf(sentient_pool_1) * 0.9999
+    before = token.balanceOf(sentient_pool_1)
+    token.transfer(gov, to_send, {"from": sentient_pool_1})
+    after = token.balanceOf(sentient_pool_1)
+    assert after < before
+    print("\nNew balance of pool 1:", after / 1e18)
+
+    # update the pools
+    pool_1 = Contract(strategy.pools(0))
+    pool_1.sync({"from": whale})
+    chain.sleep(1)
+    chain.mine(1)
+    print("We are draining this pool:", pool_1.address)
+
+    # check pool utilizations, assert that 0 and 2 have gone up
+    utes = strategy.getEachPoolUtilization({"from": whale})
+    assert utes[0] > old_utes[0]
+    print("Pool utilizations after force increase:", utes)
+
+    # remove a pair! this one has low liquidity!
+    to_remove = strategy.pools(0)
+    strategy.attemptToRemovePool(to_remove, {"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("\nThese are our allocations after the first -failed- removal:", allocations)
+
+    # check pool order
+    order = strategy.getPools({"from": whale})
+    print("Pool order:", order)
+
+    # the pool shouldn't actually be removed
+    assert len(strategy.getPools()) == 4
+
+    # check our free want
+    new_want = token.balanceOf(strategy)
+    print("\nWant after 1 removal:", new_want / 1e18)
+    print("Total estimated assets:", strategy.estimatedTotalAssets() / 1e18)
+
+    # sleep for a day and harvest, high util pools will automatically move to the back
+    chain.sleep(86400)
+    chain.mine(1)
+    strategy.setDoHealthCheck(False, {"from": gov})
+    tx = strategy.harvest({"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("\nThese are our allocations after the first harvest:", allocations)
+
+    # check pool order
+    order = strategy.getPools({"from": whale})
+    print("Pool order:", order)
+
+    # send our funds back
+    before = token.balanceOf(sentient_pool_1)
+    token.transfer(sentient_pool_1, to_send, {"from": gov})
+    after = token.balanceOf(sentient_pool_1)
+    assert after > before
+    print("\nNew balance of pool 1 after returning lost funds:", after / 1e18)
+
+    # update the pool, it should now be in the 4th spot
+    pool_4 = Contract(strategy.pools(3))
+    pool_4.sync({"from": whale})
+    chain.sleep(1)
+    chain.mine(1)
+
+    # check pool utilizations
+    newest_utes = strategy.getEachPoolUtilization({"from": whale})
+    print("Pool utilizations after sending funds back:", newest_utes)
+
+    # try to remove our same pair again, should be in the last position
+    to_remove = strategy.pools(3)
+    tx = strategy.attemptToRemovePool(to_remove, {"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    # the pool should now be removed
+    assert len(strategy.getPools()) == 3
+
+    # check allocations
+    allocations = strategy.getCurrentPoolAllocations({"from": whale})
+    print("\nThese are our allocations after the first -failed- removal:", allocations)
+
+    # check pool order
+    order = strategy.getPools({"from": whale})
+    print("Pool order:", order)
+
+    # sleep for a day and harvest, see if we lost anything or not
+    chain.sleep(86400)
+    chain.mine(1)
+    strategy.setDoHealthCheck(False, {"from": gov})
+    tx = strategy.harvest({"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    max_uint = 2 ** 256 - 1
+    loss_okay = 10000
+    tx_2 = vault.withdraw(max_uint, whale, loss_okay, {"from": whale})
+    losses = token.balanceOf(whale) - startingWhale
+    print(
+        "These are our whale's losses, if positive it's gains:",
+        losses / (10 ** token.decimals()),
+    )
+
+
+# test how our exchange rate calc compares to tarot's
+def test_exchange_rates(
+    gov,
+    token,
+    vault,
+    strategist,
+    whale,
+    strategy,
+    chain,
+    amount,
+    accounts,
+):
+
+    ## deposit to the vault after approving
+    startingWhale = token.balanceOf(whale)
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    vault.deposit(amount, {"from": whale})
+    chain.sleep(1)
+    strategy.harvest({"from": gov})
+    chain.sleep(1)
+    old_utes = strategy.getEachPoolUtilization({"from": whale})
+
+    for pool_index in range(4):
+        pool_address = strategy.pools(pool_index)
+        pool_contract = Contract(pool_address)
+
+        tarot_rate = pool_contract.exchangeRateLast({"from": whale})
+        internal_rate = strategy.trueExchangeRate(pool_address)
+
+        print("\nThis is our pool:", pool_address)
+        print("Tarot exchange rate:", tarot_rate / 1e18)
+        print("True exchange rate:", internal_rate / 1e18)
+
+        assert tarot_rate == internal_rate
+
+    # sleep for a day and harvest, high util pools will automatically move to the back
+    chain.sleep(86400)
+    tx = strategy.harvest({"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    for pool_index in range(4):
+        pool_address = strategy.pools(pool_index)
+        pool_contract = Contract(pool_address)
+
+        tarot_rate = pool_contract.exchangeRateLast({"from": whale})
+        internal_rate = strategy.trueExchangeRate(pool_address)
+
+        print("\nThis is our pool:", pool_address)
+        print("Tarot exchange rate:", tarot_rate / 1e18)
+        print("True exchange rate:", internal_rate / 1e18)
+
+        assert tarot_rate == internal_rate
+
+    # have one of the bTokens send away almost all of the free liquidity
+    sentient_pool_1 = accounts.at(strategy.pools(0), force=True)
+    to_send = token.balanceOf(sentient_pool_1) * 0.9999
+    before = token.balanceOf(sentient_pool_1)
+    token.transfer(gov, to_send, {"from": sentient_pool_1})
+    after = token.balanceOf(sentient_pool_1)
+    assert after < before
+    print("\nNew balance of pool 1:", after / 1e18)
+
+    # update the pools
+    pool_1 = Contract(strategy.pools(0))
+    pool_1.sync({"from": whale})
+    chain.sleep(1)
+    chain.mine(1)
+    print("We are draining this pool:", pool_1.address)
+
+    # check pool utilizations, assert that 0 and 2 have gone up
+    utes = strategy.getEachPoolUtilization({"from": whale})
+    assert utes[0] > old_utes[0]
+    print("Pool utilizations after force increase:", utes)
+
+    # sleep for a day and harvest, this will take losses
+    chain.sleep(86400)
+    chain.mine(1)
+    strategy.setDoHealthCheck(False, {"from": gov})
+    tx = strategy.harvest({"from": gov})
+    chain.sleep(1)
+    chain.mine(1)
+
+    for pool_index in range(4):
+        pool_address = strategy.pools(pool_index)
+        pool_contract = Contract(pool_address)
+
+        tarot_rate = pool_contract.exchangeRateLast({"from": whale})
+        internal_rate = strategy.trueExchangeRate(pool_address)
+
+        print("\nThis is our pool:", pool_address)
+        print("Tarot exchange rate:", tarot_rate / 1e18)
+        print("True exchange rate:", internal_rate / 1e18)
+
+        # our rekt pool should be at the back
+        if pool_index == 3:
+            # for the rekt pool, the tarot rate will be the same as if it didn't lose assets, so will be greater than ours
+            assert tarot_rate > internal_rate
+        else:
+            assert tarot_rate == internal_rate

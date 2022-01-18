@@ -7,13 +7,7 @@ def isolation(fn_isolation):
     pass
 
 
-@pytest.fixture(scope="module")
-def whale(accounts):
-    # Totally in it for the tech
-    # Update this with a large holder of your want token (the largest EOA holder of LP)
-    whale = accounts.at("0x39B3bd37208CBaDE74D0fcBDBb12D606295b430a", force=True)
-    yield whale
-
+###### UPDATE THESE BASED ON THE WANT WE ARE TESTING ######
 
 # this is the amount of funds we have our whale deposit. adjust this as needed based on their wallet balance
 @pytest.fixture(scope="module")
@@ -29,17 +23,77 @@ def strategy_name():
     yield strategy_name
 
 
+# @pytest.fixture(scope="module")
+# def whale(accounts): # WFTM
+#     # Totally in it for the tech
+#     # Update this with a large holder of your want token (the largest EOA holder of LP)
+#     whale = accounts.at("0x39B3bd37208CBaDE74D0fcBDBb12D606295b430a", force=True)
+#     yield whale
+
+
+# # Define relevant tokens and contracts in this section
+# @pytest.fixture(scope="module")
+# def token(): # WFTM
+#     # this should be the address of the ERC-20 used by the strategy/vault
+#     token_address = "0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"
+#     yield Contract(token_address)
+
+
+# # These are the pools we will lend to (WFTM vault)
+# @pytest.fixture(scope="module")
+# def pools():
+#     pools = [  # "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9",  # FTM-TAROT
+#         "0x93a97db4fEA1d053C31f0B658b0B87f4b38e105d",  # FTM-SPIRIT Spirit
+#         "0x6e11aaD63d11234024eFB6f7Be345d1d5b8a8f38",  # USDC-FTM Spirit
+#         "0x5B80b6e16147bc339e22296184F151262657A327",  # FTM-CRV Spooky
+#         "0xFf0BC3c7df0c247E5ce1eA220c7095cE1B6Dc745",  # FTM-USDC Spooky
+#     ]
+#     yield pools
+
+
+# # This is an extra pool we will test adding
+# @pytest.fixture(scope="module")
+# def extra(): # WFTM vault
+#     extra = "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9" # TAROT
+#     yield extra
+
+
 @pytest.fixture(scope="module")
-def healthCheck():
-    yield Contract("0xf13Cd6887C62B5beC145e30c38c4938c5E627fe0")
+def whale(accounts):  # USDC
+    # Totally in it for the tech
+    # Update this with a large holder of your want token (the largest EOA holder of LP)
+    whale = accounts.at("0xE45Ac34E528907d0A0239ab5Db507688070B20bf", force=True)
+    yield whale
 
 
 # Define relevant tokens and contracts in this section
 @pytest.fixture(scope="module")
-def token():
+def token():  # USDC
     # this should be the address of the ERC-20 used by the strategy/vault
-    token_address = "0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"
+    token_address = "0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"
     yield Contract(token_address)
+
+
+# These are the pools we will lend to (USDC vault)
+@pytest.fixture(scope="module")
+def pools():
+    pools = [
+        "0x710675A9c8509D3dF254792C548555D3D0a69494",  # WFTM
+        "0xb7FA3710A69487F37ae91D74Be55578d1353f9df",  # WFTM
+        "0x7623ABCB2A3Da6bB14Bbb713B58c9B11Fc9713B1",  # FUSDT
+        "0xD8339e66Eeb1762E699b3f0eF694269658e2421f",  # miMATIC
+    ]
+    yield pools
+
+
+# This is an extra pool we will test adding
+@pytest.fixture(scope="module")
+def extra():  # USDC vault
+    extra = "0xb91e78E239ddF33DE24e32424DecfFa036E770e4"  # This is WFTM
+    yield extra
+
+
+###### UPDATE THESE BASED ON THE WANT WE ARE TESTING ######
 
 
 # this is the amount of funds we are okay leaving in our strategy due to unrealized profit or conversion between bTokens
@@ -49,16 +103,9 @@ def dust(token):
     yield dust
 
 
-# These are the pools we will lend to
 @pytest.fixture(scope="module")
-def pools():
-    pools = [  # "0x5dd76071F7b5F4599d4F2B7c08641843B746ace9",  # FTM-TAROT
-        "0x93a97db4fEA1d053C31f0B658b0B87f4b38e105d",  # FTM-SPIRIT Spirit
-        "0x6e11aaD63d11234024eFB6f7Be345d1d5b8a8f38",  # USDC-FTM Spirit
-        "0x5B80b6e16147bc339e22296184F151262657A327",  # FTM-CRV Spooky
-        "0xFf0BC3c7df0c247E5ce1eA220c7095cE1B6Dc745",  # FTM-USDC Spooky
-    ]
-    yield pools
+def healthCheck():
+    yield Contract("0xf13Cd6887C62B5beC145e30c38c4938c5E627fe0")
 
 
 # zero address

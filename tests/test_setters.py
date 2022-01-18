@@ -31,7 +31,7 @@ def test_setters(
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be true.", tx)
     assert tx == True
-    strategy.harvest({"from": gov})
+    tx_2 = strategy.harvest({"from": gov})
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be false.", tx)
     assert tx == False
