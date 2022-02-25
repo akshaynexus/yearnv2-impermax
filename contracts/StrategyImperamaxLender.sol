@@ -52,28 +52,17 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     /* ========== CONSTRUCTOR ========== */
 
-    constructor(
-        address _vault,
-        address[] memory _pools,
-        string memory _name
-    ) public BaseStrategy(_vault) {
-        _initializeStrat(_pools, _name);
+    constructor(address _vault, string memory _name) public BaseStrategy(_vault) {
+        _initializeStrat(_name);
     }
 
     /* ========== CLONING ========== */
 
     event Cloned(address indexed clone);
 
-    function _initializeStrat(address[] memory _pools, string memory _name) internal {
+    function _initializeStrat(string memory _name) internal {
         // You can set these parameters on deployment to whatever you want
         maxReportDelay = 2 days;
-
-        // set up our pools
-        for (uint256 i = 0; i < _pools.length; i++) {
-            pools.push(_pools[i]);
-            want.safeApprove(_pools[i], type(uint256).max);
-            preventDeposits.push(false);
-        }
 
         // set our strategy's name
         stratName = _name;
@@ -84,12 +73,11 @@ contract StrategyImperamaxLender is BaseStrategy {
         address _strategist,
         address _rewards,
         address _keeper,
-        address[] memory _pools,
         string memory _name
     ) external {
         //note: initialise can only be called once. in _initialize in BaseStrategy we have: require(address(want) == address(0), "Strategy already initialized");
         _initialize(_vault, _strategist, _rewards, _keeper);
-        _initializeStrat(_pools, _name);
+        _initializeStrat(_name);
     }
 
     function cloneTarotLender(
@@ -97,7 +85,6 @@ contract StrategyImperamaxLender is BaseStrategy {
         address _strategist,
         address _rewards,
         address _keeper,
-        address[] memory _pools,
         string memory _name
     ) external returns (address newStrategy) {
         require(isOriginal);
@@ -114,7 +101,7 @@ contract StrategyImperamaxLender is BaseStrategy {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        StrategyImperamaxLender(newStrategy).initialize(_vault, _strategist, _rewards, _keeper, _pools, _name);
+        StrategyImperamaxLender(newStrategy).initialize(_vault, _strategist, _rewards, _keeper, _name);
 
         emit Cloned(newStrategy);
     }
@@ -136,6 +123,7 @@ contract StrategyImperamaxLender is BaseStrategy {
         uint256 totalBorrows = IBorrowable(_pool).totalBorrows();
         uint256 actualBalance = IBorrowable(_pool).totalBalance().add(totalBorrows);
         uint256 totalSupply = IBorrowable(_pool).totalSupply();
+        if (totalSupply == 0) return BTOKEN_DECIMALS; // same as tarot's initialExchangeRate, but we want to know if balance is 0 so we remove that check.
 
         return actualBalance.mul(BTOKEN_DECIMALS).div(totalSupply);
     }
@@ -223,6 +211,7 @@ contract StrategyImperamaxLender is BaseStrategy {
                 if (low1 >= high1) break;
                 (utilizations[low1], utilizations[high1]) = (utilizations[high1], utilizations[low1]);
                 (newPoolSorting[low1], newPoolSorting[high1]) = (newPoolSorting[high1], newPoolSorting[low1]);
+                (preventDeposits[low1], preventDeposits[high1]) = (preventDeposits[high1], preventDeposits[low1]);
                 low1++;
                 high1--;
             }
@@ -257,7 +246,7 @@ contract StrategyImperamaxLender is BaseStrategy {
             if (stakedBal > 0) {
                 // don't bother withdrawing if we don't have staked funds
                 uint256 debtNeeded = Math.min(stakedBal, _debtOutstanding);
-                _withdraw(Math.min(stakedBal, _debtOutstanding));
+                _withdraw(debtNeeded);
             }
             uint256 _withdrawnBal = balanceOfWant();
             _debtPayment = Math.min(_debtOutstanding, _withdrawnBal);
@@ -311,8 +300,7 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     function _deposit(uint256 _depositAmount) internal {
         // Deposit to highest utilization pair, which should be last in our pools array
-        for (uint256 i = pools.length; i > 0; i--) {
-            i = i.sub(1);
+        for (uint256 i = pools.length; i >= 0; i--) {
             if (!preventDeposits[i]) {
                 // only deposit to this pool if it's not shutting down.
                 address targetPool = pools[i];
@@ -452,7 +440,9 @@ contract StrategyImperamaxLender is BaseStrategy {
             IBorrowable bToken = IBorrowable(pools[i]);
 
             uint256 balanceOfbToken = bToken.balanceOf(address(this));
-            bToken.transfer(_newStrategy, balanceOfbToken);
+            if (balanceOfbToken > 0) {
+                bToken.transfer(_newStrategy, balanceOfbToken);
+            }
         }
     }
 
@@ -493,7 +483,7 @@ contract StrategyImperamaxLender is BaseStrategy {
 
     ///@notice Add another Tarot pool to our strategy for lending. This can only be called by governance.
     function addTarotPool(address _newPool) external onlyGovernance {
-        // asset must match want. Try and adapt this one?
+        // asset must match want.
         require(IBorrowable(_newPool).underlying() == address(want));
 
         for (uint256 i = 0; i < pools.length; i++) {
