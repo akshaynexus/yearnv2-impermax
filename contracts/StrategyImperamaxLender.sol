@@ -117,18 +117,6 @@ contract StrategyImperamaxLender is BaseStrategy {
         return want.balanceOf(address(this));
     }
 
-    // ***** probably eliminate this one, and also write a test to check that we assess losses correctly when losing assets (should only do so on harvests)
-    /// @notice Calculate the true exchange rate of a tarot pool since theirs is "up-only".
-    // ASK STORM, FP, WEASEL ET AL FOR FEEDBACK ABOUT USING THIS VS LIVE CALC.
-    //     function trueExchangeRate(address _pool) public view returns (uint256) {
-    //         uint256 totalBorrows = IBorrowable(_pool).totalBorrows();
-    //         uint256 actualBalance = IBorrowable(_pool).totalBalance().add(totalBorrows);
-    //         uint256 totalSupply = IBorrowable(_pool).totalSupply();
-    //         if (totalSupply == 0) return BTOKEN_DECIMALS; // same as tarot's initialExchangeRate, but we want to know if balance is 0 so we remove that check.
-    //
-    //         return actualBalance.mul(BTOKEN_DECIMALS).div(totalSupply);
-    //     }
-
     /// @notice Returns value of want lent, held in the form of bTokens.
     function stakedBalance() public view returns (uint256 total) {
         total = 0;
@@ -295,8 +283,6 @@ contract StrategyImperamaxLender is BaseStrategy {
             _deposit(toInvest);
         }
     }
-
-    event Tracking(uint256 _balance, uint256 _totalBalance, uint256 _supply);
 
     function _deposit(uint256 _depositAmount) internal {
         // Deposit to highest utilization pair, which should be last in our pools array
