@@ -22,7 +22,7 @@ def test_migration(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -32,10 +32,17 @@ def test_migration(
     new_strategy = strategist.deploy(
         StrategyImperamaxLender,
         vault,
-        pools,
         strategy_name,
     )
     total_old = strategy.estimatedTotalAssets()
+
+    # add our pools to the strategy
+    for pool in pools:
+        new_strategy.addTarotPool(pool, {"from": gov})
+
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    new_strategy.manuallySetAllocations(new_allocations, {"from": gov})
 
     # can we harvest an unactivated strategy? should be no
     # under our new method of using min and maxDelay, this no longer matters or works

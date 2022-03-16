@@ -22,7 +22,7 @@ def test_odds_and_ends(
     ## deposit to the vault after approving. turn off health check before each harvest since we're doing weird shit
     strategy.setDoHealthCheck(False, {"from": gov})
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -34,16 +34,9 @@ def test_odds_and_ends(
         to_send = pool.balanceOf(strategy)
         pool.transfer(gov, to_send, {"from": strategy})
     assert strategy.estimatedTotalAssets() == 0
-    vault.approve(strategist_ms, 1e25, {"from": whale})
 
-    chain.sleep(86400 * 4)  # fast forward so our min delay is passed
+    chain.sleep(86400)
     chain.mine(1)
-
-    # we want to check when we have a loss
-    # comment this out since we no longer use harvestTrigger from baseStrategy
-    # tx = strategy.harvestTrigger(0, {"from": gov})
-    # print("\nShould we harvest? Should be true.", tx)
-    # assert tx == True
 
     chain.sleep(1)
     strategy.setDoHealthCheck(False, {"from": gov})
@@ -58,7 +51,6 @@ def test_odds_and_ends(
     new_strategy = strategist.deploy(
         StrategyImperamaxLender,
         vault,
-        pools,
         strategy_name,
     )
     total_old = strategy.estimatedTotalAssets()
@@ -120,7 +112,7 @@ def test_odds_and_ends_2(
     ## deposit to the vault after approving. turn off health check since we're doing weird shit
     strategy.setDoHealthCheck(False, {"from": gov})
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -160,7 +152,7 @@ def test_odds_and_ends_migration(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -170,18 +162,19 @@ def test_odds_and_ends_migration(
     new_strategy = strategist.deploy(
         StrategyImperamaxLender,
         vault,
-        pools,
         strategy_name,
     )
     total_old = strategy.estimatedTotalAssets()
 
-    # can we harvest an unactivated strategy? should be no
-    # under our new method of using min and maxDelay, this no longer matters or works
-    # tx = new_strategy.harvestTrigger(0, {"from": gov})
-    # print("\nShould we harvest? Should be False.", tx)
-    # assert tx == False
+    # add our pools to the strategy
+    for pool in pools:
+        new_strategy.addTarotPool(pool, {"from": gov})
 
-    # sleep for a dau
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    new_strategy.manuallySetAllocations(new_allocations, {"from": gov})
+
+    # sleep for a day
     chain.sleep(86400)
 
     # migrate our old strategy
@@ -236,7 +229,7 @@ def test_odds_and_ends_liquidatePosition(
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     newWhale = token.balanceOf(whale)
 
@@ -300,7 +293,7 @@ def test_odds_and_ends_rekt(
     ## deposit to the vault after approving. turn off health check since we're doing weird shit
     strategy.setDoHealthCheck(False, {"from": gov})
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -320,8 +313,8 @@ def test_odds_and_ends_rekt(
     tx = strategy.harvest({"from": gov})
     chain.sleep(1)
 
-    # we can also withdraw from an empty vault as well
-    vault.withdraw({"from": whale})
+    # we can also withdraw from an empty vault as well, but we have to allow for the big loss
+    vault.withdraw(amount, whale, 10_000, {"from": whale})
 
 
 # goal of this one is to hit a withdraw when we don't have any staked assets
@@ -340,7 +333,7 @@ def test_odds_and_ends_liquidate_rekt(
     ## deposit to the vault after approving. turn off health check since we're doing weird shit
     strategy.setDoHealthCheck(False, {"from": gov})
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})
@@ -354,7 +347,7 @@ def test_odds_and_ends_liquidate_rekt(
     assert strategy.estimatedTotalAssets() == 0
 
     # we can also withdraw from an empty vault as well, but make sure we're okay with losing 100%
-    max_uint = 2 ** 256 - 1
+    max_uint = 2**256 - 1
     vault.withdraw(max_uint, whale, 10000, {"from": whale})
 
 
@@ -401,7 +394,7 @@ def test_odds_and_ends_inactive_strat(
     amount,
 ):
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     chain.sleep(1)
     strategy.harvest({"from": gov})

@@ -24,14 +24,13 @@ def test_cloning(
             strategist,
             rewards,
             keeper,
-            pools,
             strategy_name,
             {"from": gov},
         )
 
     ## clone our strategy
     tx = strategy.cloneTarotLender(
-        vault, strategist, rewards, keeper, pools, strategy_name, {"from": gov}
+        vault, strategist, rewards, keeper, strategy_name, {"from": gov}
     )
     newStrategy = StrategyImperamaxLender.at(tx.return_value)
 
@@ -42,7 +41,6 @@ def test_cloning(
             strategist,
             rewards,
             keeper,
-            pools,
             strategy_name,
             {"from": gov},
         )
@@ -50,20 +48,28 @@ def test_cloning(
     ## shouldn't be able to clone a clone
     with brownie.reverts():
         newStrategy.cloneTarotLender(
-            vault, strategist, rewards, keeper, pools, strategy_name, {"from": gov}
+            vault, strategist, rewards, keeper, strategy_name, {"from": gov}
         )
 
     vault.revokeStrategy(strategy, {"from": gov})
-    vault.addStrategy(newStrategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
+    vault.addStrategy(newStrategy, 10_000, 0, 2**256 - 1, 1_000, {"from": gov})
     assert vault.withdrawalQueue(1) == newStrategy
     assert vault.strategies(newStrategy)[2] == 10_000
     assert vault.withdrawalQueue(0) == strategy
     assert vault.strategies(strategy)[2] == 0
 
+    # add our pools to the strategy
+    for pool in pools:
+        newStrategy.addTarotPool(pool, {"from": gov})
+
+    # set our custom allocations
+    new_allocations = [2500, 2500, 2500, 2500]
+    newStrategy.manuallySetAllocations(new_allocations, {"from": gov})
+
     ## deposit to the vault after approving; this is basically just our simple_harvest test
     before_pps = vault.pricePerShare()
     startingWhale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
 
     # harvest, store asset amount

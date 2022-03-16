@@ -96,7 +96,7 @@ def main():
     else:
         strategy = Strategy.deploy(vault, {"from": dev}, publish_source=True)
     # add strat to vault
-    vault.addStrategy(strategy, 9800, 0, 2 ** 256 - 1, 1000, {"from": dev})
+    vault.addStrategy(strategy, 9800, 0, 2**256 - 1, 1000, {"from": dev})
     # Set deposit limit to 1008 1INCH tokens,Approx 50K
     vault.setDepositLimit(1008 * 1e18, {"from": dev})
     # Set keeper

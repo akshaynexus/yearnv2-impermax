@@ -117,16 +117,17 @@ contract StrategyImperamaxLender is BaseStrategy {
         return want.balanceOf(address(this));
     }
 
+    // ***** probably eliminate this one, and also write a test to check that we assess losses correctly when losing assets (should only do so on harvests)
     /// @notice Calculate the true exchange rate of a tarot pool since theirs is "up-only".
     // ASK STORM, FP, WEASEL ET AL FOR FEEDBACK ABOUT USING THIS VS LIVE CALC.
-    function trueExchangeRate(address _pool) public view returns (uint256) {
-        uint256 totalBorrows = IBorrowable(_pool).totalBorrows();
-        uint256 actualBalance = IBorrowable(_pool).totalBalance().add(totalBorrows);
-        uint256 totalSupply = IBorrowable(_pool).totalSupply();
-        if (totalSupply == 0) return BTOKEN_DECIMALS; // same as tarot's initialExchangeRate, but we want to know if balance is 0 so we remove that check.
-
-        return actualBalance.mul(BTOKEN_DECIMALS).div(totalSupply);
-    }
+    //     function trueExchangeRate(address _pool) public view returns (uint256) {
+    //         uint256 totalBorrows = IBorrowable(_pool).totalBorrows();
+    //         uint256 actualBalance = IBorrowable(_pool).totalBalance().add(totalBorrows);
+    //         uint256 totalSupply = IBorrowable(_pool).totalSupply();
+    //         if (totalSupply == 0) return BTOKEN_DECIMALS; // same as tarot's initialExchangeRate, but we want to know if balance is 0 so we remove that check.
+    //
+    //         return actualBalance.mul(BTOKEN_DECIMALS).div(totalSupply);
+    //     }
 
     /// @notice Returns value of want lent, held in the form of bTokens.
     function stakedBalance() public view returns (uint256 total) {
@@ -136,8 +137,8 @@ contract StrategyImperamaxLender is BaseStrategy {
             address currentPool = pools[i];
 
             uint256 bTokenBalance = IBorrowable(currentPool).balanceOf(address(this));
-            uint256 currentExchangeRate = trueExchangeRate(currentPool);
-            // uint256 currentExchangeRate = IBorrowable(currentPool).exchangeRateLast(); <- this is the "correct" code using tarot's values
+            // uint256 currentExchangeRate = trueExchangeRate(currentPool);
+            uint256 currentExchangeRate = IBorrowable(currentPool).exchangeRateLast(); // <- this is the "correct" code using tarot's values
             total = total.add(bTokenBalance.mul(currentExchangeRate).div(BTOKEN_DECIMALS));
         }
     }
@@ -187,19 +188,16 @@ contract StrategyImperamaxLender is BaseStrategy {
     /// @notice Reorder our array of pools by increasing utilization. Deposits go to the last pool, withdrawals start from the front.
     function reorderPools() public onlyEmergencyAuthorized {
         uint256[] memory utilizations = getEachPoolUtilization();
-        address[] memory newPoolSorting = pools;
         if (utilizations.length > 1) {
-            _reorderPools(utilizations, newPoolSorting, 0, utilizations.length - 1);
+            _reorderPools(utilizations, 0, utilizations.length - 1);
         }
-        pools = newPoolSorting;
     }
 
     function _reorderPools(
         uint256[] memory utilizations,
-        address[] memory newPoolSorting,
         uint256 low,
         uint256 high
-    ) internal pure {
+    ) internal {
         if (low < high) {
             uint256 pivotVal = utilizations[(low + high) / 2];
 
@@ -210,14 +208,14 @@ contract StrategyImperamaxLender is BaseStrategy {
                 while (utilizations[high1] > pivotVal) high1--;
                 if (low1 >= high1) break;
                 (utilizations[low1], utilizations[high1]) = (utilizations[high1], utilizations[low1]);
-                (newPoolSorting[low1], newPoolSorting[high1]) = (newPoolSorting[high1], newPoolSorting[low1]);
+                (pools[low1], pools[high1]) = (pools[high1], pools[low1]);
                 (preventDeposits[low1], preventDeposits[high1]) = (preventDeposits[high1], preventDeposits[low1]);
                 low1++;
                 high1--;
             }
-            if (low < high1) _reorderPools(utilizations, newPoolSorting, low, high1);
+            if (low < high1) _reorderPools(utilizations, low, high1);
             high1++;
-            if (high1 < high) _reorderPools(utilizations, newPoolSorting, high1, high);
+            if (high1 < high) _reorderPools(utilizations, high1, high);
         }
     }
 
@@ -240,38 +238,38 @@ contract StrategyImperamaxLender is BaseStrategy {
             reorderPools();
         }
 
-        // debtOustanding will only be > 0 if we need to rebalance from a withdrawal or lowering the debtRatio, or if we revoke the strategy.
-        uint256 stakedBal = stakedBalance();
-        if (_debtOutstanding > 0) {
-            if (stakedBal > 0) {
-                // don't bother withdrawing if we don't have staked funds
-                uint256 debtNeeded = Math.min(stakedBal, _debtOutstanding);
-                _withdraw(debtNeeded);
-            }
-            uint256 _withdrawnBal = balanceOfWant();
-            _debtPayment = Math.min(_debtOutstanding, _withdrawnBal);
-        }
-
         // this is where we record our profit and (hopefully no) losses
         uint256 assets = estimatedTotalAssets();
         uint256 debt = vault.strategies(address(this)).totalDebt;
+        uint256 wantBal = balanceOfWant();
 
-        // if assets are greater than debt, things are working great!
-        if (assets > debt) {
+        if (assets >= debt) {
+            // prevent overflow if we have losses
             _profit = assets.sub(debt);
-
-            // we need to prove to the vault that we have enough want to cover our profit and debt payment
-            uint256 _wantBal = balanceOfWant();
-
-            // check if we already have enough loose want from shutting down a pool
-            if (_wantBal < _profit.add(_debtPayment)) {
-                uint256 amountToFree = _profit.add(_debtPayment).sub(_wantBal);
-                _withdraw(amountToFree);
-            }
-        }
-        // if assets are less than debt, we are in trouble. Losses should never happen, but if it does, let's record it accurately.
-        else {
+        } else {
             _loss = debt.sub(assets);
+        }
+
+        _debtPayment = _debtOutstanding;
+        uint256 toFree = _debtPayment.add(_profit);
+
+        // this will almost always be true
+        if (toFree > wantBal) {
+            toFree = toFree.sub(wantBal);
+
+            _withdraw(toFree);
+
+            // check what we got back out
+            wantBal = balanceOfWant();
+            _debtPayment = Math.min(_debtOutstanding, wantBal);
+
+            // make sure we pay our debt first, then count profit. if not enough to pay debt, then only loss.
+            if (wantBal > _debtPayment) {
+                _profit = wantBal.sub(_debtPayment);
+            } else {
+                _profit = 0;
+                _loss = _debtPayment.sub(wantBal);
+            }
         }
 
         // we're done harvesting, so reset our trigger if we used it
@@ -298,14 +296,16 @@ contract StrategyImperamaxLender is BaseStrategy {
         }
     }
 
+    event Tracking(uint256 _balance, uint256 _totalBalance, uint256 _supply);
+
     function _deposit(uint256 _depositAmount) internal {
         // Deposit to highest utilization pair, which should be last in our pools array
-        for (uint256 i = pools.length; i >= 0; i--) {
+        for (uint256 i = (pools.length - 1); i >= 0; i--) {
             if (!preventDeposits[i]) {
                 // only deposit to this pool if it's not shutting down.
                 address targetPool = pools[i];
                 want.transfer(targetPool, _depositAmount);
-                require(IBorrowable(targetPool).mint(address(this)) >= 0);
+                IBorrowable(targetPool).mint(address(this));
                 break;
             }
         }
@@ -413,14 +413,6 @@ contract StrategyImperamaxLender is BaseStrategy {
                 }
             }
         }
-        //         if (_amountToWithdraw > withdrawn) {
-        //             // normally, we want to revert to prevent unnecessary losses.
-        //             // talk to reviewers about whether we want this or not
-        //             require(
-        //                 params.debtRatio == 0 || vaultAPIExtended(address(vault)).emergencyShutdown() || _amountToWithdraw == type(uint256).max,
-        //                 "Low liquidity"
-        //             );
-        //         }
     }
 
     function emergencyWithdraw(uint256 _amountToWithdraw) external onlyEmergencyAuthorized {
@@ -476,9 +468,12 @@ contract StrategyImperamaxLender is BaseStrategy {
                 uint256 currentWantBalance = balanceOfWant();
                 uint256 toDeposit = Math.min(currentWantBalance, toAllocate);
                 want.transfer(targetPool, toDeposit);
-                require(IBorrowable(targetPool).mint(address(this)) >= 0);
+                IBorrowable(targetPool).mint(address(this));
             }
         }
+
+        // reorder our pools based on utilization
+        reorderPools();
     }
 
     ///@notice Add another Tarot pool to our strategy for lending. This can only be called by governance.
@@ -563,6 +558,8 @@ contract StrategyImperamaxLender is BaseStrategy {
             }
         }
         require(pools.length == preventDeposits.length); // use this to ensure we didn't mess up the length of our arrays
+
+        // deposit our free want into our other pools
     }
 
     function manuallySetOrder(address[] memory _poolOrder) external onlyEmergencyAuthorized {

@@ -1,10 +1,25 @@
 import pytest
-from brownie import config, Wei, Contract
+from brownie import config, Wei, Contract, chain, web3
+import requests
 
 # Snapshots the chain before each test and reverts after test completion.
 @pytest.fixture(autouse=True)
 def isolation(fn_isolation):
     pass
+
+
+# change autouse to True if we want to use this fork to help debug tests
+@pytest.fixture(scope="module", autouse=False)
+def tenderly_fork(web3, chain):
+    fork_base_url = "https://simulate.yearn.network/fork"
+    payload = {"network_id": str(chain.id)}
+    resp = requests.post(fork_base_url, headers={}, json=payload)
+    fork_id = resp.json()["simulation_fork"]["id"]
+    fork_rpc_url = f"https://rpc.tenderly.co/fork/{fork_id}"
+    print(fork_rpc_url)
+    tenderly_provider = web3.HTTPProvider(fork_rpc_url, {"timeout": 600})
+    web3.provider = tenderly_provider
+    print(f"https://dashboard.tenderly.co/yearn/yearn-web/fork/{fork_id}")
 
 
 # this is the amount of funds we have our whale deposit. adjust this as needed based on their wallet balance
@@ -182,7 +197,7 @@ def vault(pm, gov, rewards, guardian, management, token, chain):
     Vault = pm(config["dependencies"][0]).Vault
     vault = guardian.deploy(Vault)
     vault.initialize(token, gov, rewards, "", "", guardian)
-    vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
+    vault.setDepositLimit(2**256 - 1, {"from": gov})
     vault.setManagement(management, {"from": gov})
     chain.sleep(1)
     yield vault
@@ -215,18 +230,22 @@ def strategy(
     strategy = strategist.deploy(
         StrategyImperamaxLender,
         vault,
-        pools,
         strategy_name,
     )
     strategy.setKeeper(keeper, {"from": gov})
     # set our management fee to zero so it doesn't mess with our profit checking
     vault.setManagementFee(0, {"from": gov})
     # add our new strategy
-    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
+    vault.addStrategy(strategy, 10_000, 0, 2**256 - 1, 1_000, {"from": gov})
     strategy.setHealthCheck(healthCheck, {"from": gov})
     strategy.setDoHealthCheck(True, {"from": gov})
 
+    # add our pools to the strategy
+    for pool in pools:
+        strategy.addTarotPool(pool, {"from": gov})
+
     # set our custom allocations (use this and comment it out to test 1 vs 4 pools allocated to)
+    # realistically, here should add the deposit and harvest step beforehand, as-is we don't split up
     new_allocations = [2500, 2500, 2500, 2500]
     strategy.manuallySetAllocations(new_allocations, {"from": gov})
     yield strategy
